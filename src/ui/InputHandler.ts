@@ -44,6 +44,7 @@ export class InputHandler {
   private hoveredGridSlot: { gx: number; gy: number; isAlley: boolean } | null = null;
   private nukeTargeting = false;
   private tooltip: { text: string; x: number; y: number } | null = null;
+  private showTutorial = true;
 
   constructor(game: Game, canvas: HTMLCanvasElement, camera: Camera) {
     this.game = game;
@@ -76,6 +77,7 @@ export class InputHandler {
         return;
       }
       if (e.key === 'Escape') {
+        if (this.showTutorial) { this.showTutorial = false; return; }
         this.selectedBuilding = null;
         this.nukeTargeting = false;
       }
@@ -116,6 +118,7 @@ export class InputHandler {
     });
 
     this.canvas.addEventListener('click', (e) => {
+      if (this.showTutorial) { this.showTutorial = false; return; }
       // UI panels consume click first
       if (this.handleUIClick(e)) return;
 
@@ -220,6 +223,101 @@ export class InputHandler {
     }
   }
 
+  private drawTutorial(ctx: CanvasRenderingContext2D): void {
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+
+    // Dim background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
+    ctx.fillRect(0, 0, W, H);
+
+    const pw = Math.min(W - 32, 620);
+    const ph = Math.min(H - 80, 660);
+    const px = (W - pw) / 2;
+    const py = (H - ph) / 2;
+
+    // Panel background
+    ctx.fillStyle = 'rgba(10, 12, 18, 0.97)';
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = '#2979ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, pw, ph);
+
+    const lp = px + 20;  // left padding
+    const rp = px + pw - 20;
+    let y = py + 30;
+    const lh = 22; // line height
+
+    const heading = (text: string, color = '#2979ff') => {
+      ctx.fillStyle = color;
+      ctx.font = 'bold 17px monospace';
+      ctx.fillText(text, lp, y);
+      y += lh + 4;
+    };
+    const line = (text: string, color = '#aaa') => {
+      ctx.fillStyle = color;
+      ctx.font = '14px monospace';
+      ctx.fillText(text, lp, y);
+      y += lh;
+    };
+    const rule = () => {
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(lp, y - 4); ctx.lineTo(rp, y - 4); ctx.stroke();
+      y += 6;
+    };
+
+    heading('ASCII WARS', '#fff');
+    line('2v2 real-time strategy. Destroy the enemy HQ or deliver', '#ccc');
+    line('the Diamond to your base to win instantly.', '#ccc');
+    y += 6; rule();
+
+    heading('THE MAP');
+    line('Your base is at the bottom. Enemy base is at the top.');
+    line('Lanes converge at the neck, fork around the Diamond,');
+    line('then converge again — armies clash head-on.');
+    line('★ Gold mine near HQ  ♣ Wood at left tip  ▪ Stone at right tip');
+    y += 4; rule();
+
+    heading('BUILDINGS  (click grid to place, right-click to sell)');
+    line('[1] Melee Spawner — durable fighters, spawns every 10s', '#eee');
+    line('[2] Ranged Spawner — archers, costs Wood', '#eee');
+    line('[3] Caster Spawner — magic AoE, costs Wood + Stone', '#eee');
+    line('[4] Tower — defence turret; also place in territory alley', '#eee');
+    line('[M] Miner — harvester worker; auto-places in hut zone', '#c5e1a5');
+    y += 4; rule();
+
+    heading('COMBAT & LANES');
+    line('Click a spawner to toggle its lane: Left or Right.');
+    line('[L] — flip all your buildings to the opposite lane.');
+    line('Units fight when they meet enemies. Last team standing wins.');
+    y += 4; rule();
+
+    heading('DIAMOND  ◆');
+    line('Mine the gold cells around it to expose the Diamond.');
+    line('Miners then fight to carry it back to your HQ.');
+    y += 4; rule();
+
+    heading('HOTKEYS', '#ff9800');
+    line('[M] Miner   [1-4] Buildings   [N] Fire Nuke   [L] Toggle Lanes');
+    line('[WASD / drag] Pan   [Scroll] Zoom   [R-Click] Cancel / Sell');
+
+    // X close button in top-right corner of panel
+    const btnSize = 32;
+    const btnX = px + pw - btnSize - 8;
+    const btnY2 = py + 8;
+    ctx.fillStyle = 'rgba(41,121,255,0.15)';
+    ctx.fillRect(btnX, btnY2, btnSize, btnSize);
+    ctx.strokeStyle = '#2979ff';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(btnX, btnY2, btnSize, btnSize);
+    ctx.fillStyle = '#aaa';
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('✕', btnX + btnSize / 2, btnY2 + 22);
+    ctx.textAlign = 'start';
+  }
+
   private getTrayLayout() {
     const W = this.canvas.width;
     const H = this.canvas.height;
@@ -262,6 +360,11 @@ export class InputHandler {
     const ctx = renderer.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawBuildTray(ctx);
+
+    if (this.showTutorial) {
+      this.drawTutorial(ctx);
+      return; // don't draw other overlays while tutorial is open
+    }
 
     if (this.selectedBuilding !== null && this.hoveredGridSlot) {
       this.drawPlacementPreview(ctx, renderer);

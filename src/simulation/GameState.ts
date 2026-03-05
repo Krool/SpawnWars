@@ -301,6 +301,7 @@ export function simulateTick(state: GameState, commands: GameCommand[]): void {
 
   tickSpawners(state);
   tickUnitMovement(state);
+  tickUnitCollision(state);
   tickCombat(state);
   tickTowers(state);
   tickProjectiles(state);
@@ -622,6 +623,44 @@ function applyOnHitEffects(state: GameState, attacker: UnitState, target: UnitSt
         applyKnockback(target, 0.02);
       }
       break;
+  }
+}
+
+const COLLISION_DIST = 0.85; // tile units — minimum separation between same-team units
+
+function tickUnitCollision(state: GameState): void {
+  // Collect only units actively on the path and not engaged in combat
+  const active = state.units.filter(u => u.pathProgress >= 0 && u.targetId === null);
+
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i];
+      const b = active[j];
+      if (a.team !== b.team) continue;
+      if (a.lane !== b.lane) continue; // different lanes don't collide
+
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist >= COLLISION_DIST) continue;
+
+      const overlap = COLLISION_DIST - dist;
+      const path = getLanePath(a.team, a.lane);
+      const pathLen = getPathLength(path);
+
+      // Push the trailing unit (lower pathProgress) backward
+      if (a.pathProgress < b.pathProgress) {
+        a.pathProgress = Math.max(0, a.pathProgress - overlap / pathLen);
+        const pos = interpolatePath(path, a.pathProgress);
+        a.x = pos.x;
+        a.y = pos.y;
+      } else {
+        b.pathProgress = Math.max(0, b.pathProgress - overlap / pathLen);
+        const pos = interpolatePath(path, b.pathProgress);
+        b.x = pos.x;
+        b.y = pos.y;
+      }
+    }
   }
 }
 
