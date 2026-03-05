@@ -2,10 +2,10 @@ import { Game } from '../game/Game';
 import { Camera } from '../rendering/Camera';
 import { Renderer } from '../rendering/Renderer';
 import {
-  BuildingType, TILE_SIZE, BUILD_GRID_COLS, BUILD_GRID_ROWS, Lane,
+  BuildingType, TILE_SIZE, BUILD_GRID_COLS, BUILD_GRID_ROWS, TOWER_ALLEY_COLS, TOWER_ALLEY_ROWS, Lane,
   HarvesterAssignment,
 } from '../simulation/types';
-import { getBuildGridOrigin } from '../simulation/GameState';
+import { getBuildGridOrigin, getTowerAlleyOrigin } from '../simulation/GameState';
 import { BUILDING_COSTS, HARVESTER_HUT_COST } from '../simulation/data';
 
 interface BuildTrayItem {
@@ -32,10 +32,17 @@ const ASSIGNMENT_CYCLE: HarvesterAssignment[] = [
 ];
 
 const ASSIGNMENT_LABELS: Record<HarvesterAssignment, string> = {
-  [HarvesterAssignment.BaseGold]: 'Gold',
-  [HarvesterAssignment.Wood]: 'Wood',
-  [HarvesterAssignment.Stone]: 'Stone',
-  [HarvesterAssignment.Center]: 'Center',
+  [HarvesterAssignment.BaseGold]: '★ Gold',
+  [HarvesterAssignment.Wood]: '♣ Wood',
+  [HarvesterAssignment.Stone]: '▪ Stone',
+  [HarvesterAssignment.Center]: '◆ Center',
+};
+
+const ASSIGNMENT_ICONS: Record<HarvesterAssignment, string> = {
+  [HarvesterAssignment.BaseGold]: '★',
+  [HarvesterAssignment.Wood]: '♣',
+  [HarvesterAssignment.Stone]: '▪',
+  [HarvesterAssignment.Center]: '◆',
 };
 
 export class InputHandler {
@@ -43,7 +50,7 @@ export class InputHandler {
   private canvas: HTMLCanvasElement;
   private camera: Camera;
   private selectedBuilding: BuildingType | null = null;
-  private hoveredGridSlot: { gx: number; gy: number } | null = null;
+  private hoveredGridSlot: { gx: number; gy: number; isAlley: boolean } | null = null;
   private nukeTargeting = false;
   private tooltip: { text: string; x: number; y: number } | null = null;
 
@@ -137,6 +144,7 @@ export class InputHandler {
         this.game.sendCommand({
           type: 'place_building', playerId: 0,
           buildingType: this.selectedBuilding, gridX: slot.gx, gridY: slot.gy,
+          ...(slot.isAlley ? { gridType: 'alley' as const } : {}),
         });
       }
     });
@@ -164,12 +172,24 @@ export class InputHandler {
     });
   }
 
-  private worldToGridSlot(playerId: number, worldPixelX: number, worldPixelY: number): { gx: number; gy: number } | null {
+  private worldToGridSlot(playerId: number, worldPixelX: number, worldPixelY: number): { gx: number; gy: number; isAlley: boolean } | null {
+    const tx = Math.floor(worldPixelX / TILE_SIZE);
+    const ty = Math.floor(worldPixelY / TILE_SIZE);
+
+    // Check tower alley first (only for Tower type)
+    if (this.selectedBuilding === BuildingType.Tower) {
+      const alley = getTowerAlleyOrigin(playerId);
+      const agx = tx - alley.x, agy = ty - alley.y;
+      if (agx >= 0 && agx < TOWER_ALLEY_COLS && agy >= 0 && agy < TOWER_ALLEY_ROWS) {
+        return { gx: agx, gy: agy, isAlley: true };
+      }
+    }
+
+    // Military grid
     const origin = getBuildGridOrigin(playerId);
-    const gx = Math.floor(worldPixelX / TILE_SIZE) - origin.x;
-    const gy = Math.floor(worldPixelY / TILE_SIZE) - origin.y;
+    const gx = tx - origin.x, gy = ty - origin.y;
     if (gx < 0 || gx >= BUILD_GRID_COLS || gy < 0 || gy >= BUILD_GRID_ROWS) return null;
-    return { gx, gy };
+    return { gx, gy, isAlley: false };
   }
 
   private handleBuildingClick(e: MouseEvent): void {
@@ -389,8 +409,8 @@ export class InputHandler {
         ctx.font = 'bold 14px monospace';
         ctx.fillText('HUT', hx + hutSlotW / 2, hutY + 16);
         ctx.fillStyle = '#aaa';
-        ctx.font = '13px monospace';
-        ctx.fillText(harvester ? ASSIGNMENT_LABELS[harvester.assignment] : '···', hx + hutSlotW / 2, hutY + 32);
+        ctx.font = '15px monospace';
+        ctx.fillText(harvester ? ASSIGNMENT_ICONS[harvester.assignment] : '···', hx + hutSlotW / 2, hutY + 32);
         // HP bar
         const hpFrac = hut.hp / hut.maxHp;
         ctx.fillStyle = '#222';
@@ -416,13 +436,15 @@ export class InputHandler {
 
   private drawPlacementPreview(ctx: CanvasRenderingContext2D, renderer: Renderer): void {
     if (!this.hoveredGridSlot) return;
+    const slot = this.hoveredGridSlot;
 
-    const origin = getBuildGridOrigin(0);
-    const worldX = (origin.x + this.hoveredGridSlot.gx) * TILE_SIZE;
-    const worldY = (origin.y + this.hoveredGridSlot.gy) * TILE_SIZE;
+    const origin = slot.isAlley ? getTowerAlleyOrigin(0) : getBuildGridOrigin(0);
+    const worldX = (origin.x + slot.gx) * TILE_SIZE;
+    const worldY = (origin.y + slot.gy) * TILE_SIZE;
 
+    const grid = slot.isAlley ? 'alley' : 'military';
     const occupied = this.game.state.buildings.some(
-      b => b.playerId === 0 && b.gridX === this.hoveredGridSlot!.gx && b.gridY === this.hoveredGridSlot!.gy
+      b => b.playerId === 0 && b.buildGrid === grid && b.gridX === slot.gx && b.gridY === slot.gy
     );
 
     renderer.camera.applyTransform(ctx);

@@ -2,13 +2,13 @@ import { Camera } from './Camera';
 import {
   GameState, Team, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE,
   DIAMOND_CENTER_X, DIAMOND_CENTER_Y,
-  ZONES, BUILD_GRID_COLS, BUILD_GRID_ROWS,
+  ZONES, BUILD_GRID_COLS, BUILD_GRID_ROWS, HUT_GRID_COLS, TOWER_ALLEY_COLS, TOWER_ALLEY_ROWS,
   HQ_WIDTH, HQ_HEIGHT, HQ_HP,
   getMarginAtRow,
   BuildingType, Lane, LANE_PATHS, Vec2,
   StatusType,
 } from '../simulation/types';
-import { getHQPosition, getBuildGridOrigin } from '../simulation/GameState';
+import { getHQPosition, getBuildGridOrigin, getHutGridOrigin, getTowerAlleyOrigin } from '../simulation/GameState';
 import { RACE_COLORS, TOWER_STATS, PLAYER_COLORS } from '../simulation/data';
 
 const T = TILE_SIZE;
@@ -46,6 +46,8 @@ export class Renderer {
     this.drawDiamondCells(ctx, state);
     this.drawResourceNodes(ctx);
     this.drawBuildGrids(ctx, state);
+    this.drawHutZones(ctx, state);
+    this.drawTowerAlleys(ctx, state);
     this.drawHQs(ctx, state);
     this.drawBuildings(ctx, state);
     this.drawProjectiles(ctx, state);
@@ -284,6 +286,81 @@ export class Renderer {
     }
   }
 
+  // === Hut Zones ===
+
+  private drawHutZones(ctx: CanvasRenderingContext2D, state: GameState): void {
+    for (let p = 0; p < 4; p++) {
+      const player = state.players[p];
+      if (!player) continue;
+      const origin = getHutGridOrigin(p);
+      const pc = PLAYER_COLORS[p];
+      const r = parseInt(pc.slice(1, 3), 16);
+      const g = parseInt(pc.slice(3, 5), 16);
+      const b = parseInt(pc.slice(5, 7), 16);
+      const tc = `rgba(${r}, ${g}, ${b},`;
+
+      ctx.fillStyle = tc + '0.06)';
+      ctx.fillRect(origin.x * T, origin.y * T, HUT_GRID_COLS * T, T);
+      ctx.strokeStyle = tc + '0.3)';
+      ctx.lineWidth = 1;
+      for (let gx = 0; gx <= HUT_GRID_COLS; gx++) {
+        ctx.beginPath();
+        ctx.moveTo((origin.x + gx) * T, origin.y * T);
+        ctx.lineTo((origin.x + gx) * T, (origin.y + 1) * T);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = tc + '0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(origin.x * T, origin.y * T, HUT_GRID_COLS * T, T);
+
+      ctx.fillStyle = tc + '0.5)';
+      ctx.font = 'bold 9px monospace';
+      const ly = p < 2 ? (origin.y + 1.8) * T : (origin.y - 0.4) * T;
+      ctx.fillText(`P${p + 1} HUTS`, origin.x * T, ly);
+    }
+  }
+
+  // === Tower Alleys ===
+
+  private drawTowerAlleys(ctx: CanvasRenderingContext2D, state: GameState): void {
+    for (let p = 0; p < 4; p++) {
+      const player = state.players[p];
+      if (!player) continue;
+      const origin = getTowerAlleyOrigin(p);
+      const pc = PLAYER_COLORS[p];
+      const r = parseInt(pc.slice(1, 3), 16);
+      const g = parseInt(pc.slice(3, 5), 16);
+      const b = parseInt(pc.slice(5, 7), 16);
+      const tc = `rgba(${r}, ${g}, ${b},`;
+
+      ctx.fillStyle = tc + '0.08)';
+      ctx.fillRect(origin.x * T, origin.y * T, TOWER_ALLEY_COLS * T, TOWER_ALLEY_ROWS * T);
+      ctx.strokeStyle = tc + '0.25)';
+      ctx.lineWidth = 0.5;
+      for (let gx = 0; gx <= TOWER_ALLEY_COLS; gx++) {
+        ctx.beginPath();
+        ctx.moveTo((origin.x + gx) * T, origin.y * T);
+        ctx.lineTo((origin.x + gx) * T, (origin.y + TOWER_ALLEY_ROWS) * T);
+        ctx.stroke();
+      }
+      for (let gy = 0; gy <= TOWER_ALLEY_ROWS; gy++) {
+        ctx.beginPath();
+        ctx.moveTo(origin.x * T, (origin.y + gy) * T);
+        ctx.lineTo((origin.x + TOWER_ALLEY_COLS) * T, (origin.y + gy) * T);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = tc + '0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(origin.x * T, origin.y * T, TOWER_ALLEY_COLS * T, TOWER_ALLEY_ROWS * T);
+
+      ctx.fillStyle = tc + '0.6)';
+      ctx.font = 'bold 9px monospace';
+      const isBottom = p < 2;
+      const ly = isBottom ? (origin.y + TOWER_ALLEY_ROWS + 1.2) * T : (origin.y - 0.4) * T;
+      ctx.fillText(`P${p + 1} ALLEY`, origin.x * T, ly);
+    }
+  }
+
   // === HQs ===
 
   private drawHQs(ctx: CanvasRenderingContext2D, state: GameState): void {
@@ -383,14 +460,15 @@ export class Renderer {
         case BuildingType.HarvesterHut: {
           ctx.beginPath(); ctx.arc(px, py, half, 0, Math.PI * 2);
           ctx.fill(); ctx.strokeStyle = '#ffd700'; ctx.stroke();
-          // Show assignment letter
+          // Show assignment icon
           const harv = state.harvesters.find(h => h.hutId === b.id);
           if (harv) {
-            const labels: Record<string, string> = { base_gold: 'G', wood: 'W', stone: 'S', center: 'C' };
-            ctx.fillStyle = '#ffd700';
-            ctx.font = 'bold 8px monospace';
+            const icons: Record<string, string> = { base_gold: '★', wood: '♣', stone: '▪', center: '◆' };
+            const colors: Record<string, string> = { base_gold: '#ffd700', wood: '#4caf50', stone: '#9e9e9e', center: '#fff' };
+            ctx.fillStyle = colors[harv.assignment] || '#ffd700';
+            ctx.font = 'bold 9px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText(labels[harv.assignment] || '?', px, py + 3);
+            ctx.fillText(icons[harv.assignment] || '?', px, py + 3);
             ctx.textAlign = 'start';
           }
           break;

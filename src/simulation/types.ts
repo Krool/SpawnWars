@@ -10,6 +10,14 @@ export const TICK_MS = 1000 / TICK_RATE;
 export const BUILD_GRID_COLS = 14;
 export const BUILD_GRID_ROWS = 3;
 
+// Hut grid: 10 wide x 1 tall, per player, at the edge of their base zone
+export const HUT_GRID_COLS = 10;
+export const HUT_GRID_ROWS = 1;
+
+// Tower alley grid: 4 wide x 2 tall, per player, flanking the neck corridor
+export const TOWER_ALLEY_COLS = 4;
+export const TOWER_ALLEY_ROWS = 2;
+
 // Map zone boundaries (row indices)
 // Y=0 is TOP of map, Y=MAP_HEIGHT is BOTTOM
 export const ZONES = {
@@ -212,6 +220,7 @@ export interface BuildingState {
   id: number;
   type: BuildingType;
   playerId: number;
+  buildGrid: 'military' | 'alley' | 'hut';
   gridX: number;
   gridY: number;
   worldX: number;
@@ -356,7 +365,7 @@ export interface GameState {
 // === Commands (client -> server) ===
 
 export type GameCommand =
-  | { type: 'place_building'; playerId: number; buildingType: BuildingType; gridX: number; gridY: number }
+  | { type: 'place_building'; playerId: number; buildingType: BuildingType; gridX: number; gridY: number; gridType?: 'alley' }
   | { type: 'sell_building'; playerId: number; buildingId: number }
   | { type: 'toggle_lane'; playerId: number; buildingId: number; lane: Lane }
   | { type: 'toggle_all_lanes'; playerId: number; lane: Lane }

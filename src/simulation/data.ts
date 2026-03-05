@@ -3,9 +3,9 @@ import { BuildingType, Race, TICK_RATE } from './types';
 // Building costs: { gold, wood, stone, hp }
 export const BUILDING_COSTS: Record<BuildingType, { gold: number; wood: number; stone: number; hp: number }> = {
   [BuildingType.MeleeSpawner]: { gold: 100, wood: 0, stone: 0, hp: 300 },
-  [BuildingType.RangedSpawner]: { gold: 120, wood: 20, stone: 0, hp: 250 },
-  [BuildingType.CasterSpawner]: { gold: 150, wood: 30, stone: 20, hp: 200 },
-  [BuildingType.Tower]: { gold: 200, wood: 0, stone: 50, hp: 200 },
+  [BuildingType.RangedSpawner]: { gold: 120, wood: 10, stone: 0, hp: 250 },
+  [BuildingType.CasterSpawner]: { gold: 150, wood: 15, stone: 10, hp: 200 },
+  [BuildingType.Tower]: { gold: 200, wood: 0, stone: 25, hp: 200 },
   [BuildingType.HarvesterHut]: { gold: 50, wood: 0, stone: 0, hp: 150 },
 };
 

@@ -1,7 +1,7 @@
 import {
   GameState, PlayerState, DiamondState, Team, Race, Lane,
   MAP_WIDTH, HQ_HP, HQ_WIDTH, HQ_HEIGHT,
-  BUILD_GRID_COLS, BUILD_GRID_ROWS, ZONES, TICK_RATE,
+  BUILD_GRID_COLS, BUILD_GRID_ROWS, HUT_GRID_COLS, TOWER_ALLEY_COLS, TOWER_ALLEY_ROWS, ZONES, TICK_RATE,
   DIAMOND_CENTER_X, DIAMOND_CENTER_Y, DIAMOND_HALF_W, DIAMOND_HALF_H,
   GOLD_PER_CELL, GoldCell, CROSS_BASE_MARGIN, CROSS_BASE_WIDTH,
   LANE_PATHS, Vec2,
@@ -206,6 +206,24 @@ export function getBuildGridOrigin(playerId: number): { x: number; y: number } {
   return { x, y };
 }
 
+// Hut zone: 10-wide × 1-tall row at the far edge of the player's base
+export function getHutGridOrigin(playerId: number): { x: number; y: number } {
+  const team = playerId < 2 ? Team.Bottom : Team.Top;
+  const isLeft = playerId === 0 || playerId === 2;
+  const x = isLeft ? 25 : 41;
+  const y = team === Team.Bottom ? ZONES.BOTTOM_BASE.end - 2 : ZONES.TOP_BASE.start + 1;
+  return { x, y };
+}
+
+// Tower alley: 4-wide × 2-tall grids flanking the neck corridor in the territory zone
+export function getTowerAlleyOrigin(playerId: number): { x: number; y: number } {
+  const team = playerId < 2 ? Team.Bottom : Team.Top;
+  const isLeft = playerId === 0 || playerId === 2;
+  const x = isLeft ? 20 : 54;
+  const y = team === Team.Bottom ? 93 : 26;
+  return { x, y };
+}
+
 export function getHQPosition(team: Team): { x: number; y: number } {
   const centerX = Math.floor(MAP_WIDTH / 2) - Math.floor(HQ_WIDTH / 2);
   return team === Team.Bottom
@@ -309,30 +327,42 @@ function processCommand(state: GameState, cmd: GameCommand): void {
 function placeBuilding(state: GameState, cmd: Extract<GameCommand, { type: 'place_building' }>): void {
   const player = state.players[cmd.playerId];
   if (!player) return;
+  if (cmd.buildingType === BuildingType.HarvesterHut) return; // huts use build_hut command
   const cost = BUILDING_COSTS[cmd.buildingType];
   if (!cost) return;
   if (player.gold < cost.gold || player.wood < cost.wood || player.stone < cost.stone) return;
-  if (state.buildings.some(b => b.playerId === cmd.playerId && b.gridX === cmd.gridX && b.gridY === cmd.gridY)) return;
-  if (cmd.gridX < 0 || cmd.gridX >= BUILD_GRID_COLS || cmd.gridY < 0 || cmd.gridY >= BUILD_GRID_ROWS) return;
 
-  player.gold -= cost.gold;
-  player.wood -= cost.wood;
-  player.stone -= cost.stone;
-
-  const world = gridSlotToWorld(cmd.playerId, cmd.gridX, cmd.gridY);
+  const isAlley = cmd.gridType === 'alley';
   const isLeft = cmd.playerId === 0 || cmd.playerId === 2;
 
-  // Towers use spawnTimer as attack cooldown (start ready to fire)
-  const initialTimer = cmd.buildingType === BuildingType.Tower ? 0 : SPAWN_INTERVAL_TICKS;
-
-  state.buildings.push({
-    id: genId(), type: cmd.buildingType, playerId: cmd.playerId,
-    gridX: cmd.gridX, gridY: cmd.gridY,
-    worldX: world.x, worldY: world.y,
-    lane: isLeft ? Lane.Left : Lane.Right,
-    hp: cost.hp, maxHp: cost.hp,
-    spawnTimer: initialTimer, upgradePath: ['A'],
-  });
+  if (isAlley) {
+    // Tower alley: only towers allowed
+    if (cmd.buildingType !== BuildingType.Tower) return;
+    if (cmd.gridX < 0 || cmd.gridX >= TOWER_ALLEY_COLS || cmd.gridY < 0 || cmd.gridY >= TOWER_ALLEY_ROWS) return;
+    if (state.buildings.some(b => b.buildGrid === 'alley' && b.playerId === cmd.playerId && b.gridX === cmd.gridX && b.gridY === cmd.gridY)) return;
+    const origin = getTowerAlleyOrigin(cmd.playerId);
+    const world = { x: origin.x + cmd.gridX, y: origin.y + cmd.gridY };
+    player.gold -= cost.gold; player.wood -= cost.wood; player.stone -= cost.stone;
+    state.buildings.push({
+      id: genId(), type: cmd.buildingType, playerId: cmd.playerId, buildGrid: 'alley',
+      gridX: cmd.gridX, gridY: cmd.gridY, worldX: world.x, worldY: world.y,
+      lane: isLeft ? Lane.Left : Lane.Right,
+      hp: cost.hp, maxHp: cost.hp, spawnTimer: 0, upgradePath: ['A'],
+    });
+  } else {
+    // Military grid
+    if (cmd.gridX < 0 || cmd.gridX >= BUILD_GRID_COLS || cmd.gridY < 0 || cmd.gridY >= BUILD_GRID_ROWS) return;
+    if (state.buildings.some(b => b.buildGrid === 'military' && b.playerId === cmd.playerId && b.gridX === cmd.gridX && b.gridY === cmd.gridY)) return;
+    player.gold -= cost.gold; player.wood -= cost.wood; player.stone -= cost.stone;
+    const world = gridSlotToWorld(cmd.playerId, cmd.gridX, cmd.gridY);
+    const initialTimer = cmd.buildingType === BuildingType.Tower ? 0 : SPAWN_INTERVAL_TICKS;
+    state.buildings.push({
+      id: genId(), type: cmd.buildingType, playerId: cmd.playerId, buildGrid: 'military',
+      gridX: cmd.gridX, gridY: cmd.gridY, worldX: world.x, worldY: world.y,
+      lane: isLeft ? Lane.Left : Lane.Right,
+      hp: cost.hp, maxHp: cost.hp, spawnTimer: initialTimer, upgradePath: ['A'],
+    });
+  }
 }
 
 function sellBuilding(state: GameState, cmd: Extract<GameCommand, { type: 'sell_building' }>): void {
@@ -365,33 +395,32 @@ function toggleAllLanes(state: GameState, cmd: Extract<GameCommand, { type: 'tog
 
 function buildHut(state: GameState, cmd: Extract<GameCommand, { type: 'build_hut' }>): void {
   const player = state.players[cmd.playerId];
-  const hutCount = state.buildings.filter(b => b.playerId === cmd.playerId && b.type === BuildingType.HarvesterHut).length;
-  if (hutCount >= 10) return;
-  const cost = HARVESTER_HUT_COST(hutCount);
+  const myHuts = state.buildings.filter(b => b.playerId === cmd.playerId && b.type === BuildingType.HarvesterHut);
+  if (myHuts.length >= HUT_GRID_COLS) return;
+  const cost = HARVESTER_HUT_COST(myHuts.length);
   if (player.gold < cost) return;
   player.gold -= cost;
 
-  const occupied = new Set(state.buildings.filter(b => b.playerId === cmd.playerId).map(b => `${b.gridX},${b.gridY}`));
-  for (let gy = BUILD_GRID_ROWS - 1; gy >= 0; gy--) {
-    for (let gx = 0; gx < BUILD_GRID_COLS; gx++) {
-      if (!occupied.has(`${gx},${gy}`)) {
-        const world = gridSlotToWorld(cmd.playerId, gx, gy);
-        const building: BuildingState = {
-          id: genId(), type: BuildingType.HarvesterHut, playerId: cmd.playerId,
-          gridX: gx, gridY: gy, worldX: world.x, worldY: world.y,
-          lane: Lane.Left, hp: 150, maxHp: 150, spawnTimer: 0, upgradePath: [],
-        };
-        state.buildings.push(building);
-        state.harvesters.push({
-          id: genId(), hutId: building.id, playerId: cmd.playerId, team: player.team,
-          x: world.x, y: world.y, hp: 30, maxHp: 30, damage: 0,
-          assignment: HarvesterAssignment.BaseGold,
-          state: 'walking_to_node', miningTimer: 0, respawnTimer: 0,
-          carryingDiamond: false, carryingResource: null, carryAmount: 0,
-          targetCellIdx: -1, fightTargetId: null,
-        });
-        return;
-      }
+  const origin = getHutGridOrigin(cmd.playerId);
+  const occupiedHuts = new Set(myHuts.map(b => b.gridX));
+  for (let gx = 0; gx < HUT_GRID_COLS; gx++) {
+    if (!occupiedHuts.has(gx)) {
+      const world = { x: origin.x + gx, y: origin.y };
+      const building: BuildingState = {
+        id: genId(), type: BuildingType.HarvesterHut, playerId: cmd.playerId, buildGrid: 'hut',
+        gridX: gx, gridY: 0, worldX: world.x, worldY: world.y,
+        lane: Lane.Left, hp: 150, maxHp: 150, spawnTimer: 0, upgradePath: [],
+      };
+      state.buildings.push(building);
+      state.harvesters.push({
+        id: genId(), hutId: building.id, playerId: cmd.playerId, team: player.team,
+        x: world.x, y: world.y, hp: 30, maxHp: 30, damage: 0,
+        assignment: HarvesterAssignment.BaseGold,
+        state: 'walking_to_node', miningTimer: 0, respawnTimer: 0,
+        carryingDiamond: false, carryingResource: null, carryAmount: 0,
+        targetCellIdx: -1, fightTargetId: null,
+      });
+      return;
     }
   }
 }
