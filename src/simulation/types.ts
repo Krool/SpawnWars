@@ -14,9 +14,9 @@ export const BUILD_GRID_ROWS = 3;
 export const HUT_GRID_COLS = 10;
 export const HUT_GRID_ROWS = 1;
 
-// Tower alley grid: 4 wide x 2 tall, per player, flanking the neck corridor
-export const TOWER_ALLEY_COLS = 4;
-export const TOWER_ALLEY_ROWS = 2;
+// Shared tower alley: 10 wide x 3 tall, one per team, straddling the neck path
+export const SHARED_ALLEY_COLS = 10;
+export const SHARED_ALLEY_ROWS = 3;
 
 // Map zone boundaries (row indices)
 // Y=0 is TOP of map, Y=MAP_HEIGHT is BOTTOM

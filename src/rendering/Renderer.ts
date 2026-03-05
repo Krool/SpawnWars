@@ -2,13 +2,13 @@ import { Camera } from './Camera';
 import {
   GameState, Team, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE,
   DIAMOND_CENTER_X, DIAMOND_CENTER_Y,
-  ZONES, BUILD_GRID_COLS, BUILD_GRID_ROWS, HUT_GRID_COLS, TOWER_ALLEY_COLS, TOWER_ALLEY_ROWS,
+  ZONES, BUILD_GRID_COLS, BUILD_GRID_ROWS, HUT_GRID_COLS, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS,
   HQ_WIDTH, HQ_HEIGHT, HQ_HP,
   getMarginAtRow,
   BuildingType, Lane, LANE_PATHS, Vec2,
   StatusType,
 } from '../simulation/types';
-import { getHQPosition, getBuildGridOrigin, getHutGridOrigin, getTowerAlleyOrigin } from '../simulation/GameState';
+import { getHQPosition, getBuildGridOrigin, getHutGridOrigin, getTeamAlleyOrigin } from '../simulation/GameState';
 import { RACE_COLORS, TOWER_STATS, PLAYER_COLORS } from '../simulation/data';
 
 const T = TILE_SIZE;
@@ -322,42 +322,38 @@ export class Renderer {
 
   // === Tower Alleys ===
 
-  private drawTowerAlleys(ctx: CanvasRenderingContext2D, state: GameState): void {
-    for (let p = 0; p < 4; p++) {
-      const player = state.players[p];
-      if (!player) continue;
-      const origin = getTowerAlleyOrigin(p);
-      const pc = PLAYER_COLORS[p];
-      const r = parseInt(pc.slice(1, 3), 16);
-      const g = parseInt(pc.slice(3, 5), 16);
-      const b = parseInt(pc.slice(5, 7), 16);
-      const tc = `rgba(${r}, ${g}, ${b},`;
+  private drawTowerAlleys(ctx: CanvasRenderingContext2D, _state: GameState): void {
+    for (const team of [Team.Bottom, Team.Top]) {
+      const origin = getTeamAlleyOrigin(team);
+      const color = team === Team.Bottom ? '41,121,255' : '255,23,68';
 
-      ctx.fillStyle = tc + '0.08)';
-      ctx.fillRect(origin.x * T, origin.y * T, TOWER_ALLEY_COLS * T, TOWER_ALLEY_ROWS * T);
-      ctx.strokeStyle = tc + '0.25)';
+      ctx.fillStyle = `rgba(${color},0.06)`;
+      ctx.fillRect(origin.x * T, origin.y * T, SHARED_ALLEY_COLS * T, SHARED_ALLEY_ROWS * T);
+
+      ctx.strokeStyle = `rgba(${color},0.22)`;
       ctx.lineWidth = 0.5;
-      for (let gx = 0; gx <= TOWER_ALLEY_COLS; gx++) {
+      for (let gx = 0; gx <= SHARED_ALLEY_COLS; gx++) {
         ctx.beginPath();
         ctx.moveTo((origin.x + gx) * T, origin.y * T);
-        ctx.lineTo((origin.x + gx) * T, (origin.y + TOWER_ALLEY_ROWS) * T);
+        ctx.lineTo((origin.x + gx) * T, (origin.y + SHARED_ALLEY_ROWS) * T);
         ctx.stroke();
       }
-      for (let gy = 0; gy <= TOWER_ALLEY_ROWS; gy++) {
+      for (let gy = 0; gy <= SHARED_ALLEY_ROWS; gy++) {
         ctx.beginPath();
         ctx.moveTo(origin.x * T, (origin.y + gy) * T);
-        ctx.lineTo((origin.x + TOWER_ALLEY_COLS) * T, (origin.y + gy) * T);
+        ctx.lineTo((origin.x + SHARED_ALLEY_COLS) * T, (origin.y + gy) * T);
         ctx.stroke();
       }
-      ctx.strokeStyle = tc + '0.4)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(origin.x * T, origin.y * T, TOWER_ALLEY_COLS * T, TOWER_ALLEY_ROWS * T);
 
-      ctx.fillStyle = tc + '0.6)';
+      ctx.strokeStyle = `rgba(${color},0.45)`;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(origin.x * T, origin.y * T, SHARED_ALLEY_COLS * T, SHARED_ALLEY_ROWS * T);
+
+      ctx.fillStyle = `rgba(${color},0.55)`;
       ctx.font = 'bold 9px monospace';
-      const isBottom = p < 2;
-      const ly = isBottom ? (origin.y + TOWER_ALLEY_ROWS + 1.2) * T : (origin.y - 0.4) * T;
-      ctx.fillText(`P${p + 1} ALLEY`, origin.x * T, ly);
+      const isBottom = team === Team.Bottom;
+      const ly = isBottom ? (origin.y + SHARED_ALLEY_ROWS + 1.2) * T : (origin.y - 0.4) * T;
+      ctx.fillText('TOWER ALLEY', origin.x * T, ly);
     }
   }
 
@@ -823,32 +819,6 @@ export class Renderer {
       ctx.textAlign = 'start';
     }
 
-    this.drawControlsHelp(ctx);
-  }
-
-  private drawControlsHelp(ctx: CanvasRenderingContext2D): void {
-    const lh = 19;
-    const items: [string, string][] = [
-      ['1-4', 'Select building'],
-      ['Click', 'Place / interact'],
-      ['R-Click', 'Cancel / Sell'],
-      ['L', 'Toggle all lanes'],
-      ['N', 'Fire nuke'],
-      ['WASD', 'Pan camera'],
-      ['Scroll', 'Zoom'],
-    ];
-    const boxW = 210, boxH = lh * items.length + 14;
-    const rx = this.canvas.width - boxW - 6, ry = 50;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
-    ctx.fillRect(rx - 6, ry - 16, boxW + 12, boxH);
-
-    ctx.font = '14px monospace';
-    items.forEach(([key, desc], i) => {
-      ctx.fillStyle = '#888';
-      ctx.fillText(key, rx, ry + i * lh);
-      ctx.fillStyle = '#555';
-      ctx.fillText(desc, rx + 72, ry + i * lh);
-    });
   }
 
   // === Minimap ===
@@ -856,7 +826,7 @@ export class Renderer {
   private drawMinimap(ctx: CanvasRenderingContext2D, state: GameState): void {
     const mmW = 120, mmH = 180;
     const mx = this.canvas.width - mmW - 10;
-    const my = this.canvas.height - mmH - 76; // above build tray (68px tray + 8px pad)
+    const my = 48; // top-right, just below HUD bar
     const scaleX = mmW / MAP_WIDTH;
     const scaleY = mmH / MAP_HEIGHT;
 

@@ -2,10 +2,10 @@ import { Game } from '../game/Game';
 import { Camera } from '../rendering/Camera';
 import { Renderer } from '../rendering/Renderer';
 import {
-  BuildingType, TILE_SIZE, BUILD_GRID_COLS, BUILD_GRID_ROWS, TOWER_ALLEY_COLS, TOWER_ALLEY_ROWS, Lane,
-  HarvesterAssignment,
+  BuildingType, TILE_SIZE, BUILD_GRID_COLS, BUILD_GRID_ROWS, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS, Lane,
+  HarvesterAssignment, Team,
 } from '../simulation/types';
-import { getBuildGridOrigin, getTowerAlleyOrigin } from '../simulation/GameState';
+import { getBuildGridOrigin, getTeamAlleyOrigin } from '../simulation/GameState';
 import { BUILDING_COSTS, HARVESTER_HUT_COST } from '../simulation/data';
 
 interface BuildTrayItem {
@@ -175,11 +175,12 @@ export class InputHandler {
     const tx = Math.floor(worldPixelX / TILE_SIZE);
     const ty = Math.floor(worldPixelY / TILE_SIZE);
 
-    // Check tower alley first (only for Tower type)
+    // Check shared tower alley first (only for Tower type)
     if (this.selectedBuilding === BuildingType.Tower) {
-      const alley = getTowerAlleyOrigin(playerId);
+      const team = playerId < 2 ? Team.Bottom : Team.Top;
+      const alley = getTeamAlleyOrigin(team);
       const agx = tx - alley.x, agy = ty - alley.y;
-      if (agx >= 0 && agx < TOWER_ALLEY_COLS && agy >= 0 && agy < TOWER_ALLEY_ROWS) {
+      if (agx >= 0 && agx < SHARED_ALLEY_COLS && agy >= 0 && agy < SHARED_ALLEY_ROWS) {
         return { gx: agx, gy: agy, isAlley: true };
       }
     }
@@ -470,7 +471,7 @@ export class InputHandler {
     if (!this.hoveredGridSlot) return;
     const slot = this.hoveredGridSlot;
 
-    const origin = slot.isAlley ? getTowerAlleyOrigin(0) : getBuildGridOrigin(0);
+    const origin = slot.isAlley ? getTeamAlleyOrigin(Team.Bottom) : getBuildGridOrigin(0);
     const worldX = (origin.x + slot.gx) * TILE_SIZE;
     const worldY = (origin.y + slot.gy) * TILE_SIZE;
 

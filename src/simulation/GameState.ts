@@ -1,7 +1,7 @@
 import {
   GameState, PlayerState, DiamondState, Team, Race, Lane,
   MAP_WIDTH, HQ_HP, HQ_WIDTH, HQ_HEIGHT,
-  BUILD_GRID_COLS, BUILD_GRID_ROWS, HUT_GRID_COLS, TOWER_ALLEY_COLS, TOWER_ALLEY_ROWS, ZONES, TICK_RATE,
+  BUILD_GRID_COLS, BUILD_GRID_ROWS, HUT_GRID_COLS, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS, ZONES, TICK_RATE,
   DIAMOND_CENTER_X, DIAMOND_CENTER_Y, DIAMOND_HALF_W, DIAMOND_HALF_H,
   GOLD_PER_CELL, GoldCell, CROSS_BASE_MARGIN, CROSS_BASE_WIDTH,
   LANE_PATHS, Vec2,
@@ -220,13 +220,9 @@ export function getHutGridOrigin(playerId: number): { x: number; y: number } {
   return { x, y };
 }
 
-// Tower alley: 4-wide × 2-tall grids flanking the neck corridor in the territory zone
-export function getTowerAlleyOrigin(playerId: number): { x: number; y: number } {
-  const team = playerId < 2 ? Team.Bottom : Team.Top;
-  const isLeft = playerId === 0 || playerId === 2;
-  const x = isLeft ? 20 : 54;
-  const y = team === Team.Bottom ? 93 : 26;
-  return { x, y };
+// Shared tower alley: 10-wide × 3-tall grid per team, centred on the neck path (x=35, overlaps x=40)
+export function getTeamAlleyOrigin(team: Team): { x: number; y: number } {
+  return { x: 35, y: team === Team.Bottom ? 86 : 31 };
 }
 
 export function getHQPosition(team: Team): { x: number; y: number } {
@@ -347,11 +343,14 @@ function placeBuilding(state: GameState, cmd: Extract<GameCommand, { type: 'plac
   const isLeft = cmd.playerId === 0 || cmd.playerId === 2;
 
   if (isAlley) {
-    // Tower alley: only towers allowed
+    // Shared tower alley: only towers allowed; occupancy is team-wide
     if (cmd.buildingType !== BuildingType.Tower) return;
-    if (cmd.gridX < 0 || cmd.gridX >= TOWER_ALLEY_COLS || cmd.gridY < 0 || cmd.gridY >= TOWER_ALLEY_ROWS) return;
-    if (state.buildings.some(b => b.buildGrid === 'alley' && b.playerId === cmd.playerId && b.gridX === cmd.gridX && b.gridY === cmd.gridY)) return;
-    const origin = getTowerAlleyOrigin(cmd.playerId);
+    if (cmd.gridX < 0 || cmd.gridX >= SHARED_ALLEY_COLS || cmd.gridY < 0 || cmd.gridY >= SHARED_ALLEY_ROWS) return;
+    const playerTeam = cmd.playerId < 2 ? Team.Bottom : Team.Top;
+    if (state.buildings.some(b => b.buildGrid === 'alley' &&
+        (b.playerId < 2 ? Team.Bottom : Team.Top) === playerTeam &&
+        b.gridX === cmd.gridX && b.gridY === cmd.gridY)) return;
+    const origin = getTeamAlleyOrigin(playerTeam);
     const world = { x: origin.x + cmd.gridX, y: origin.y + cmd.gridY };
     player.gold -= cost.gold; player.wood -= cost.wood; player.stone -= cost.stone;
     state.buildings.push({
