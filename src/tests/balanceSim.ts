@@ -6,7 +6,7 @@ import { runAllBotAI, createBotContext } from '../simulation/BotAI';
 
 const MATCHES_PER_MATCHUP = 10;
 const MAX_MATCH_TICKS = 15 * 60 * TICK_RATE; // 15 min hard cap
-const ALL_RACES = [Race.Surge, Race.Tide, Race.Ember, Race.Bastion, Race.Shade, Race.Thorn];
+const ALL_RACES = [Race.Crown, Race.Horde, Race.Goblins, Race.Oozlings, Race.Demon, Race.Deep, Race.Wild, Race.Geists, Race.Tenders];
 
 // ==================== TYPES ====================
 

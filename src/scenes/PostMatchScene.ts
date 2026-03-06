@@ -1,6 +1,7 @@
 import { Scene, SceneManager } from './Scene';
 import { GameState, Team, PlayerStats } from '../simulation/types';
 import { PLAYER_COLORS, RACE_COLORS } from '../simulation/data';
+import { UIAssets } from '../rendering/UIAssets';
 
 export interface MatchStats {
   state: GameState;
@@ -10,15 +11,17 @@ export interface MatchStats {
 export class PostMatchScene implements Scene {
   private manager: SceneManager;
   private canvas: HTMLCanvasElement;
+  private ui: UIAssets;
   private stats: MatchStats | null = null;
   private animTime = 0;
   private clickHandler: ((e: MouseEvent) => void) | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private touchHandler: ((e: TouchEvent) => void) | null = null;
 
-  constructor(manager: SceneManager, canvas: HTMLCanvasElement) {
+  constructor(manager: SceneManager, canvas: HTMLCanvasElement, ui: UIAssets) {
     this.manager = manager;
     this.canvas = canvas;
+    this.ui = ui;
   }
 
   setStats(stats: MatchStats): void {
@@ -68,8 +71,8 @@ export class PostMatchScene implements Scene {
   private getButtonRect(): { x: number; y: number; w: number; h: number } {
     const w = this.canvas.width;
     const h = this.canvas.height;
-    const btnW = 200;
-    const btnH = 48;
+    const btnW = 260;
+    const btnH = 56;
     return { x: (w - btnW) / 2, y: h * 0.90, w: btnW, h: btnH };
   }
 
@@ -85,8 +88,14 @@ export class PostMatchScene implements Scene {
   render(ctx: CanvasRenderingContext2D): void {
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
+    ctx.imageSmoothingEnabled = false;
 
-    ctx.fillStyle = '#0a0a0a';
+    // Water background
+    if (!this.ui.drawWaterBg(ctx, w, h, this.animTime)) {
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, w, h);
+    }
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(0, 0, w, h);
 
     if (!this.stats) {
@@ -102,42 +111,58 @@ export class PostMatchScene implements Scene {
     const won = state.winner === localTeam;
     const fontSize = Math.max(11, Math.min(w / 35, 20));
 
-    // VICTORY / DEFEAT header
-    ctx.font = `bold ${fontSize * 2.5}px monospace`;
+    // VICTORY / DEFEAT banner
+    const headerBannerW = Math.min(w * 0.7, 500);
+    const headerBannerH = Math.min(80, h * 0.1);
+    const headerBannerX = (w - headerBannerW) / 2;
+    const headerBannerY = h * 0.02;
+    this.ui.drawBigRibbon(ctx, headerBannerX, headerBannerY, headerBannerW, headerBannerH, won ? 0 : 1);
+
+    ctx.font = `bold ${fontSize * 2.2}px monospace`;
     ctx.textAlign = 'center';
     if (won) {
-      const hue = (this.animTime / 10) % 360;
-      ctx.fillStyle = `hsl(${hue}, 80%, 65%)`;
-      ctx.fillText('VICTORY', w / 2, h * 0.08);
+      ctx.fillStyle = '#fff';
+      ctx.fillText('VICTORY', w / 2, headerBannerY + headerBannerH * 0.62);
     } else {
-      ctx.fillStyle = '#ff4444';
-      ctx.fillText('DEFEAT', w / 2, h * 0.08);
+      ctx.fillStyle = '#fff';
+      ctx.fillText('DEFEAT', w / 2, headerBannerY + headerBannerH * 0.62);
     }
 
     // Win condition + match time
     ctx.font = `${fontSize}px monospace`;
-    ctx.fillStyle = '#888';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
     const condText = state.winCondition === 'military' ? 'HQ Destroyed'
       : state.winCondition === 'diamond' ? 'Diamond Delivered'
       : state.winCondition === 'timeout' ? 'Time Expired' : '';
     const totalSec = Math.floor(state.tick / 20);
-    ctx.fillText(`${condText}  -  ${Math.floor(totalSec / 60)}:${(totalSec % 60).toString().padStart(2, '0')}`, w / 2, h * 0.13);
+    ctx.fillText(`${condText}  -  ${Math.floor(totalSec / 60)}:${(totalSec % 60).toString().padStart(2, '0')}`, w / 2, headerBannerY + headerBannerH + 20);
 
-    // === Player stats table ===
-    const tableY = h * 0.18;
+    // Stats table panel - Banner 9-slice
+    const panelW = Math.min(w * 0.92, 800);
+    const panelH = h * 0.55;
+    const panelX = (w - panelW) / 2;
+    const panelY = headerBannerY + headerBannerH + 32;
+    this.ui.drawBanner(ctx, panelX, panelY, panelW, panelH);
+
+    // Player stats table
+    const tableY = panelY + 40;
     const rowH = fontSize * 1.9;
-    const colX = [w * 0.04, w * 0.22, w * 0.36, w * 0.48, w * 0.58, w * 0.70, w * 0.82, w * 0.94];
+    const colX = [panelX + panelW * 0.04, panelX + panelW * 0.22, panelX + panelW * 0.36,
+                  panelX + panelW * 0.48, panelX + panelW * 0.58, panelX + panelW * 0.70,
+                  panelX + panelW * 0.82, panelX + panelW * 0.94];
 
-    // Header
+    // Header row with icons
     ctx.font = `bold ${fontSize * 0.7}px monospace`;
-    ctx.fillStyle = '#555';
+    ctx.fillStyle = '#fff';
     ctx.textAlign = 'left';
     ctx.fillText('PLAYER', colX[0], tableY);
     ctx.textAlign = 'right';
-    ctx.fillText('GOLD', colX[2], tableY);
-    ctx.fillText('WOOD', colX[3], tableY);
-    ctx.fillText('STONE', colX[4], tableY);
-    ctx.fillText('SPAWNED', colX[5], tableY);
+    const hdrIconSz = fontSize * 0.8;
+    this.ui.drawIcon(ctx, 'gold', colX[2] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
+    this.ui.drawIcon(ctx, 'wood', colX[3] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
+    this.ui.drawIcon(ctx, 'meat', colX[4] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
+    this.ui.drawIcon(ctx, 'sword', colX[5] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
+    ctx.fillStyle = '#fff';
     ctx.fillText('KILLED', colX[6], tableY);
     ctx.fillText('DAMAGE', colX[7], tableY);
 
@@ -148,8 +173,8 @@ export class PostMatchScene implements Scene {
       const y = tableY + (i + 1) * rowH;
 
       if (i === localPlayerId) {
-        ctx.fillStyle = 'rgba(255,255,255,0.05)';
-        ctx.fillRect(colX[0] - 6, y - rowH * 0.65, w * 0.94, rowH);
+        ctx.fillStyle = 'rgba(41,121,255,0.1)';
+        ctx.fillRect(colX[0] - 6, y - rowH * 0.65, panelW * 0.92, rowH);
       }
 
       const teamStr = p.team === Team.Bottom ? 'BTM' : 'TOP';
@@ -160,7 +185,7 @@ export class PostMatchScene implements Scene {
       ctx.fillText(`P${i + 1} ${teamStr} ${raceStr}`, colX[0], y);
 
       ctx.font = `${fontSize * 0.75}px monospace`;
-      ctx.fillStyle = '#ccc';
+      ctx.fillStyle = '#fff';
       ctx.textAlign = 'right';
       ctx.fillText(`${ps?.totalGoldEarned ?? 0}`, colX[2], y);
       ctx.fillText(`${ps?.totalWoodEarned ?? 0}`, colX[3], y);
@@ -170,19 +195,33 @@ export class PostMatchScene implements Scene {
       ctx.fillText(`${ps?.totalDamageDealt ?? 0}`, colX[7], y);
     }
 
-    // HQ HP
+    // HQ HP with bar sprites
     const hqY = tableY + (state.players.length + 1.5) * rowH;
     ctx.font = `bold ${fontSize * 0.85}px monospace`;
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(`HQ Health:  Bottom ${state.hqHp[0]}  vs  Top ${state.hqHp[1]}`, w / 2, hqY);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('HQ Health', w / 2, hqY);
 
-    // === Awards ===
+    const barW = Math.min(120, panelW * 0.15);
+    const barH = 16;
+    const barGap = 40;
+    this.ui.drawBar(ctx, w / 2 - barW - barGap, hqY + 6, barW, barH, state.hqHp[0] / 1000);
+    ctx.fillStyle = '#2979ff';
+    ctx.font = `${fontSize * 0.7}px monospace`;
+    ctx.fillText(`BTM ${state.hqHp[0]}`, w / 2 - barW / 2 - barGap, hqY + 30);
+    this.ui.drawBar(ctx, w / 2 + barGap, hqY + 6, barW, barH, state.hqHp[1] / 1000);
+    ctx.fillStyle = '#ff1744';
+    ctx.fillText(`TOP ${state.hqHp[1]}`, w / 2 + barW / 2 + barGap, hqY + 30);
+
+    // Awards
     const awards = this.computeAwards(pStats);
-    const awardY = hqY + rowH * 1.5;
+    const awardY = hqY + rowH * 2.2;
+    const awardRibW = Math.min(300, panelW * 0.5);
+    const awardRibH = fontSize * 1.6;
+    this.ui.drawSmallRibbon(ctx, (w - awardRibW) / 2, awardY - awardRibH * 0.7, awardRibW, awardRibH, 2);
     ctx.font = `bold ${fontSize * 0.85}px monospace`;
-    ctx.fillStyle = '#ffab00';
-    ctx.fillText('-- AWARDS --', w / 2, awardY);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('AWARDS', w / 2, awardY);
     ctx.font = `${fontSize * 0.75}px monospace`;
     for (let i = 0; i < awards.length; i++) {
       const a = awards[i];
@@ -190,34 +229,37 @@ export class PostMatchScene implements Scene {
       ctx.fillText(`${a.label}: P${a.playerId + 1} (${a.value})`, w / 2, awardY + (i + 1) * rowH * 0.75);
     }
 
-    // === War Hero ===
+    // War Hero
     const heroY = awardY + (awards.length + 1.5) * rowH * 0.75;
     this.drawWarHero(ctx, state, w, heroY, fontSize);
 
-    // === Continue button ===
+    // Continue button - Sword
     const btn = this.getButtonRect();
-    ctx.fillStyle = '#00e5ff';
-    ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+    this.ui.drawSword(ctx, btn.x, btn.y, btn.w, btn.h, 0);
     ctx.font = 'bold 18px monospace';
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#000';
-    ctx.fillText('CONTINUE', w / 2, btn.y + btn.h / 2 + 6);
+    const btnTextX = btn.x + btn.w * 0.52;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillText('CONTINUE', btnTextX + 1, btn.y + btn.h * 0.58 + 1);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('CONTINUE', btnTextX, btn.y + btn.h * 0.58);
   }
 
   private drawWarHero(ctx: CanvasRenderingContext2D, state: GameState, w: number, y: number, fontSize: number): void {
     const heroes = state.warHeroes;
     if (heroes.length === 0) return;
 
-    const hero = heroes[0]; // The #1 war hero
+    const hero = heroes[0];
     const playerColor = PLAYER_COLORS[hero.playerId];
     const raceColor = RACE_COLORS[state.players[hero.playerId]?.race]?.primary ?? '#fff';
 
+    // Shield icon + title
+    this.ui.drawIcon(ctx, 'shield', w / 2 - fontSize * 0.5, y - fontSize * 0.8, fontSize * 1.0);
     ctx.font = `bold ${fontSize * 0.85}px monospace`;
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffab00';
-    ctx.fillText('-- WAR HERO --', w / 2, y);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('WAR HERO', w / 2, y + fontSize * 0.5);
 
-    // Hero name and stats
     ctx.font = `bold ${fontSize}px monospace`;
     ctx.fillStyle = raceColor;
     ctx.fillText(`${hero.name}`, w / 2, y + fontSize * 1.6);
@@ -227,7 +269,6 @@ export class PostMatchScene implements Scene {
     const categoryIcon = hero.category === 'melee' ? 'Melee' : hero.category === 'ranged' ? 'Ranged' : 'Caster';
     ctx.fillText(`P${hero.playerId + 1}'s ${categoryIcon}  -  ${hero.kills} kills`, w / 2, y + fontSize * 2.8);
 
-    // Fate
     ctx.font = `${fontSize * 0.75}px monospace`;
     if (hero.survived) {
       ctx.fillStyle = '#4caf50';

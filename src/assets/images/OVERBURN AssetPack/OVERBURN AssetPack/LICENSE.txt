@@ -1,0 +1,10 @@
+---- LICENSE ------------------------------
+
+You can use this asset in your personal and commercial games,
+you can modify this object to fit your needs.
+
+You can not redistribute or resell this asset. Even if you edited it before.
+You can not call your project with a Over- prefix if you're using this asset
+(Example : you can't name your game "Overburn" if you use this asset)
+
+Credit is not required but would be appreciated. 

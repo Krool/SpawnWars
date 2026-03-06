@@ -8,6 +8,8 @@ import {
 import { getBuildGridOrigin, getTeamAlleyOrigin } from '../simulation/GameState';
 import { UPGRADE_TREES, RACE_BUILDING_COSTS, RACE_UPGRADE_COSTS, UNIT_STATS, TOWER_STATS, RACE_COLORS } from '../simulation/data';
 import { TICK_RATE } from '../simulation/types';
+import { UIAssets } from '../rendering/UIAssets';
+import { SpriteLoader, drawSpriteFrame } from '../rendering/SpriteLoader';
 
 interface BuildTrayItem {
   type: BuildingType;
@@ -44,12 +46,12 @@ const ASSIGNMENT_LABELS: Record<HarvesterAssignment, string> = {
   [HarvesterAssignment.Center]: 'C Center',
 };
 
-const LANE_MODE_STORAGE_KEY = 'asciiwars.laneToggleMode';
-const UI_FEEDBACK_STORAGE_KEY = 'asciiwars.uiFeedbackEnabled';
-const RADIAL_ARM_MS_STORAGE_KEY = 'asciiwars.radialArmMs';
-const RADIAL_SIZE_STORAGE_KEY = 'asciiwars.radialSize';
-const RADIAL_A11Y_STORAGE_KEY = 'asciiwars.radialA11y';
-const MOBILE_HINT_SEEN_KEY = 'asciiwars.mobileHintSeen';
+const LANE_MODE_STORAGE_KEY = 'spawnwars.laneToggleMode';
+const UI_FEEDBACK_STORAGE_KEY = 'spawnwars.uiFeedbackEnabled';
+const RADIAL_ARM_MS_STORAGE_KEY = 'spawnwars.radialArmMs';
+const RADIAL_SIZE_STORAGE_KEY = 'spawnwars.radialSize';
+const RADIAL_A11Y_STORAGE_KEY = 'spawnwars.radialA11y';
+const MOBILE_HINT_SEEN_KEY = 'spawnwars.mobileHintSeen';
 
 export class InputHandler {
   private game: Game;
@@ -91,11 +93,16 @@ export class InputHandler {
   private devOverlayOpen = false;
   private abortController = new AbortController();
   private currentRenderer: Renderer | null = null;
+  private ui: UIAssets;
+  private sprites: SpriteLoader | null = null;
+  private trayTick = 0;
 
-  constructor(game: Game, canvas: HTMLCanvasElement, camera: Camera) {
+  constructor(game: Game, canvas: HTMLCanvasElement, camera: Camera, ui?: UIAssets, sprites?: SpriteLoader) {
     this.game = game;
     this.canvas = canvas;
     this.camera = camera;
+    this.ui = ui ?? new UIAssets();
+    this.sprites = sprites ?? null;
     this.setupKeyboard();
     this.setupMouse();
     this.loadSettings();
@@ -618,16 +625,20 @@ export class InputHandler {
     const px = (W - pw) / 2;
     const py = (H - ph) / 2;
 
-    // Panel background
-    ctx.fillStyle = 'rgba(10, 12, 18, 0.97)';
-    ctx.fillRect(px, py, pw, ph);
-    ctx.strokeStyle = '#2979ff';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, pw, ph);
+    // Panel background - SpecialPaper 9-slice
+    if (!this.ui.drawSpecialPaper(ctx, px, py, pw, ph)) {
+      ctx.fillStyle = 'rgba(10, 12, 18, 0.97)';
+      ctx.fillRect(px, py, pw, ph);
+      ctx.strokeStyle = '#2979ff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px, py, pw, ph);
+    }
 
-    const lp = px + 16;
-    const rp = px + pw - 16;
-    let y = py + (compact ? 24 : 28);
+    // Inset past the 9-slice decorative corner borders
+    const inset = Math.max(28, Math.min(pw, ph) * 0.07);
+    const lp = px + inset;
+    const rp = px + pw - inset;
+    let y = py + inset + (compact ? 4 : 8);
     const lh = compact ? 17 : 20;
     const headingSize = compact ? 14 : 16;
     const bodySize = compact ? 12 : 14;
@@ -655,7 +666,7 @@ export class InputHandler {
       y += compact ? 2 : 4;
     };
 
-    heading('ASCII WARS', '#fff');
+    heading('SPAWN WARS', '#fff');
     line('2v2 RTS: destroy enemy HQ or bring Diamond home to win.', '#ccc');
     y += compact ? 0 : 2;
     rule();
@@ -693,18 +704,21 @@ export class InputHandler {
     line('Mobile: hold map for chat wheel, use PING/SETTINGS/CHAT above tray');
     line('Use ? (top-right) anytime to reopen this help.', '#9bb7ff');
 
-    const btnX = px + pw - closeSize - 8;
-    const btnY = py + 8;
-    ctx.fillStyle = 'rgba(41,121,255,0.15)';
-    ctx.fillRect(btnX, btnY, closeSize, closeSize);
-    ctx.strokeStyle = '#2979ff';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(btnX, btnY, closeSize, closeSize);
-    ctx.fillStyle = '#aaa';
-    ctx.font = `bold ${headingSize}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.fillText('X', btnX + closeSize / 2, btnY + (compact ? 19 : 22));
-    ctx.textAlign = 'start';
+    const btnX = px + pw - closeSize - inset;
+    const btnY = py + inset;
+    // Close button - X icon sprite
+    if (!this.ui.drawIcon(ctx, 'close', btnX, btnY, closeSize)) {
+      ctx.fillStyle = 'rgba(41,121,255,0.15)';
+      ctx.fillRect(btnX, btnY, closeSize, closeSize);
+      ctx.strokeStyle = '#2979ff';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(btnX, btnY, closeSize, closeSize);
+      ctx.fillStyle = '#aaa';
+      ctx.font = `bold ${headingSize}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText('X', btnX + closeSize / 2, btnY + (compact ? 19 : 22));
+      ctx.textAlign = 'start';
+    }
   }
 
   private getHelpButtonRect(): { x: number; y: number; w: number; h: number } {
@@ -712,10 +726,24 @@ export class InputHandler {
     return { x: this.canvas.width - size - 10, y: 10, w: size, h: size };
   }
 
+  private getSettingsButtonRect(): { x: number; y: number; w: number; h: number } {
+    const size = 30;
+    return { x: this.canvas.width - size * 2 - 18, y: 10, w: size, h: size };
+  }
+
   private handleHelpButtonClick(e: MouseEvent): boolean {
     const rect = this.canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
+
+    // Settings button (top-right, left of info)
+    const sr = this.getSettingsButtonRect();
+    if (cx >= sr.x && cx <= sr.x + sr.w && cy >= sr.y && cy <= sr.y + sr.h) {
+      this.settingsOpen = !this.settingsOpen;
+      this.showTutorial = false;
+      return true;
+    }
+
     const r = this.getHelpButtonRect();
     if (cx < r.x || cx > r.x + r.w || cy < r.y || cy > r.y + r.h) return false;
     this.showTutorial = !this.showTutorial;
@@ -726,17 +754,44 @@ export class InputHandler {
   }
 
   private drawHelpButton(ctx: CanvasRenderingContext2D): void {
+    // Settings button (left of info)
+    const sr = this.getSettingsButtonRect();
+    if (this.settingsOpen) {
+      ctx.fillStyle = 'rgba(41,121,255,0.35)';
+      ctx.fillRect(sr.x, sr.y, sr.w, sr.h);
+    }
+    if (!this.ui.drawIcon(ctx, 'settings', sr.x, sr.y, sr.w)) {
+      ctx.fillStyle = 'rgba(18,18,18,0.92)';
+      ctx.fillRect(sr.x, sr.y, sr.w, sr.h);
+      ctx.strokeStyle = '#9bb7ff';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(sr.x, sr.y, sr.w, sr.h);
+      ctx.fillStyle = '#e3f2fd';
+      ctx.font = 'bold 16px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚙', sr.x + sr.w / 2, sr.y + 21);
+      ctx.textAlign = 'start';
+    }
+
+    // Info button
     const r = this.getHelpButtonRect();
-    ctx.fillStyle = this.showTutorial ? 'rgba(41,121,255,0.35)' : 'rgba(18,18,18,0.92)';
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = '#9bb7ff';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(r.x, r.y, r.w, r.h);
-    ctx.fillStyle = '#e3f2fd';
-    ctx.font = 'bold 18px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('?', r.x + r.w / 2, r.y + 21);
-    ctx.textAlign = 'start';
+    if (this.showTutorial) {
+      ctx.fillStyle = 'rgba(41,121,255,0.35)';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    // Use info icon sprite
+    if (!this.ui.drawIcon(ctx, 'info', r.x, r.y, r.w)) {
+      ctx.fillStyle = 'rgba(18,18,18,0.92)';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = '#9bb7ff';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.fillStyle = '#e3f2fd';
+      ctx.font = 'bold 18px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('?', r.x + r.w / 2, r.y + 21);
+      ctx.textAlign = 'start';
+    }
   }
 
   private getTrayLayout() {
@@ -757,16 +812,15 @@ export class InputHandler {
     const pad = 10;
     const maxW = 100;
     const minW = 82;
-    const total = W - (pad * 2) - (gap * 2);
-    const utilW = Math.max(minW, Math.min(maxW, Math.floor(total / 3)));
-    const used = utilW * 3 + gap * 2;
+    const total = W - (pad * 2) - gap;
+    const utilW = Math.max(minW, Math.min(maxW, Math.floor(total / 2)));
+    const used = utilW * 2 + gap;
     const startX = Math.max(pad, Math.floor((W - used) / 2));
     return {
       utilY,
       utilH,
       pingX: startX,
-      settingsX: startX + utilW + gap,
-      chatX: startX + (utilW + gap) * 2,
+      chatX: startX + utilW + gap,
       utilW,
     };
   }
@@ -850,10 +904,6 @@ export class InputHandler {
         this.game.sendCommand({ type: 'ping', playerId: 0, x: wx / TILE_SIZE, y: wy / TILE_SIZE });
         return true;
       }
-      if (cx >= util.settingsX && cx < util.settingsX + util.utilW) {
-        this.settingsOpen = !this.settingsOpen;
-        return true;
-      }
       if (cx >= util.chatX && cx < util.chatX + util.utilW) {
         const chatCoolingDown = Date.now() < this.quickChatCooldownUntil;
         if (chatCoolingDown) {
@@ -885,8 +935,9 @@ export class InputHandler {
     }
 
     if (this.settingsOpen) {
-      const sx = W - 220;
-      const sy = milY - 124;
+      const sr = this.getSettingsButtonRect();
+      const sx = sr.x + sr.w - 200;
+      const sy = sr.y + sr.h + 4;
       if (cx < sx || cx >= sx + 200 || cy < sy || cy >= sy + 226) {
         this.settingsOpen = false;
         return true;
@@ -969,6 +1020,8 @@ export class InputHandler {
 
   render(renderer: Renderer): void {
     this.currentRenderer = renderer;
+    if (!this.sprites) this.sprites = renderer.sprites;
+    this.trayTick++;
     this.processQueuedQuickChat();
     const ctx = renderer.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1042,82 +1095,147 @@ export class InputHandler {
     const player = this.game.state.players[0];
     const quickChatCdMs = Math.max(0, this.quickChatCooldownUntil - Date.now());
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
-    ctx.fillRect(0, milY, W, milH);
+    // Build tray background - WoodTable 9-slice
+    if (!this.ui.drawWoodTable(ctx, 0, milY, W, milH)) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
+      ctx.fillRect(0, milY, W, milH);
+    }
 
     // Utility buttons above tray
     const util = this.getUtilityLayout(milY);
     const utilY = util.utilY;
-    const compact = W < 430;
-    ctx.fillStyle = 'rgba(20,20,20,0.88)';
-    ctx.fillRect(util.pingX, utilY, util.utilW, util.utilH);
-    ctx.strokeStyle = '#ffe082';
-    ctx.strokeRect(util.pingX, utilY, util.utilW, util.utilH);
-    ctx.fillStyle = '#ffe082';
-    ctx.font = 'bold 12px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('PING', util.pingX + util.utilW / 2, utilY + 16);
 
-    ctx.fillStyle = this.settingsOpen ? 'rgba(41,121,255,0.22)' : 'rgba(20,20,20,0.88)';
-    ctx.fillRect(util.settingsX, utilY, util.utilW, util.utilH);
-    ctx.strokeStyle = '#9bb7ff';
-    ctx.strokeRect(util.settingsX, utilY, util.utilW, util.utilH);
-    ctx.fillStyle = '#9bb7ff';
-    ctx.fillText(compact ? 'SET' : 'SETTINGS', util.settingsX + util.utilW / 2, utilY + 16);
-    if (compact) {
-      ctx.fillStyle = '#bbdefb';
-      ctx.font = 'bold 10px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(this.laneToggleMode === 'single' ? 'FAST' : 'SAFE', util.settingsX + util.utilW - 6, utilY + 16);
-    }
+    // Ping button with play icon
+    this.ui.drawSmallBlueRoundButton(ctx, util.pingX, utilY, util.utilH);
+    ctx.fillStyle = '#ffe082';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('PING', util.pingX + util.utilW / 2, utilY + util.utilH + 10);
 
     const chatCoolingDown = quickChatCdMs > 0;
     const chatIsQueued = this.queuedQuickChat !== null;
-    ctx.fillStyle = this.quickChatRadialActive
-      ? 'rgba(41,121,255,0.22)'
-      : (chatCoolingDown ? 'rgba(255,152,0,0.22)' : 'rgba(20,20,20,0.88)');
-    ctx.fillRect(util.chatX, utilY, util.utilW, util.utilH);
-    ctx.strokeStyle = '#90caf9';
-    ctx.strokeRect(util.chatX, utilY, util.utilW, util.utilH);
+    // Chat button with music icon as placeholder
+    if (chatCoolingDown) {
+      this.ui.drawSmallRedRoundButton(ctx, util.chatX + (util.utilW - util.utilH) / 2, utilY, util.utilH);
+    } else {
+      this.ui.drawSmallBlueRoundButton(ctx, util.chatX + (util.utilW - util.utilH) / 2, utilY, util.utilH);
+    }
     ctx.fillStyle = chatCoolingDown ? '#ffcc80' : '#90caf9';
-    ctx.font = 'bold 12px monospace';
+    ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(chatCoolingDown ? 'DEFEND' : 'CHAT', util.chatX + util.utilW / 2, utilY + 16);
+    ctx.fillText(chatCoolingDown ? 'DEFEND' : 'CHAT', util.chatX + util.utilW / 2, utilY + util.utilH + 10);
     if (chatIsQueued) {
       ctx.fillStyle = '#ffcc80';
-      ctx.font = 'bold 10px monospace';
-      ctx.fillText('QUEUED', util.chatX + util.utilW / 2, utilY + 24);
-    } else if (chatCoolingDown) {
-      ctx.fillStyle = '#ffcc80';
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('Tap = queue Defend', util.chatX + util.utilW / 2, utilY - 4);
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText('QUEUED', util.chatX + util.utilW / 2, utilY + util.utilH + 20);
     }
-    // --- Helper: draw colorized cost parts at a position ---
+    // --- Helper: draw colorized cost parts with resource icons ---
+    const costIconSize = 14;
     const drawCost = (parts: { val: number; type: 'g' | 'w' | 's' }[], cx: number, cy: number, affordable: boolean) => {
       const goldColor = affordable ? '#ffd740' : '#665500';
       const woodColor = affordable ? '#81c784' : '#2e5530';
       const stoneColor = affordable ? '#b0bec5' : '#4a5058';
-      ctx.font = 'bold 12px monospace';
-      const strs = parts.map(p => `${p.val}${p.type}`);
-      const gap = 5;
+      ctx.font = 'bold 11px monospace';
+      const gap = 4;
+      // Calculate total width: icon + number for each part
       let totalW = 0;
-      for (let j = 0; j < strs.length; j++) {
-        totalW += ctx.measureText(strs[j]).width;
-        if (j < strs.length - 1) totalW += gap;
+      const valStrs = parts.map(p => `${p.val}`);
+      for (let j = 0; j < parts.length; j++) {
+        totalW += costIconSize + 1 + ctx.measureText(valStrs[j]).width;
+        if (j < parts.length - 1) totalW += gap;
       }
       let drawX = cx - totalW / 2;
       for (let j = 0; j < parts.length; j++) {
+        const iconName = parts[j].type === 'g' ? 'gold' : parts[j].type === 'w' ? 'wood' : 'meat';
+        const iconAlpha = affordable ? 1 : 0.4;
+        ctx.globalAlpha = iconAlpha;
+        this.ui.drawIcon(ctx, iconName as any, drawX, cy - costIconSize + 2, costIconSize);
+        ctx.globalAlpha = 1;
+        drawX += costIconSize + 1;
         ctx.fillStyle = parts[j].type === 'g' ? goldColor : parts[j].type === 'w' ? woodColor : stoneColor;
         ctx.textAlign = 'left';
-        ctx.fillText(strs[j], drawX, cy);
-        drawX += ctx.measureText(strs[j]).width + gap;
+        ctx.fillText(valStrs[j], drawX, cy);
+        drawX += ctx.measureText(valStrs[j]).width + gap;
       }
     };
 
-    // Cell layout: icon square on left (~22%), text column on right (~78%)
-    const iconColW = Math.min(Math.floor(milW * 0.22), 34);
-    const cellTextX = (cellX: number) => cellX + iconColW + (milW - iconColW) / 2;
+    // === Shared cell drawing helper ===
+    const race = player.race;
+    const spriteSize = Math.round(milH * 0.52); // sprite fits in top portion
+    const spriteBaseY = milY + spriteSize + 2; // shared ground line for bottom-anchoring
+    const selectedRaise = 6; // pixels to raise selected cell
+
+    const drawCell = (
+      cellX: number, isSelected: boolean, canAfford: boolean,
+      name: string, spriteCategory: 'melee' | 'ranged' | 'caster' | 'tower' | 'miner',
+      costParts: { val: number; type: 'g' | 'w' | 's' }[] | null,
+      freeText: string | null,
+      keyHint: string,
+    ) => {
+      const cellY = isSelected ? milY - selectedRaise : milY;
+      const cellH = isSelected ? milH + selectedRaise : milH;
+
+      // Cell background
+      ctx.fillStyle = isSelected ? 'rgba(41, 121, 255, 0.28)' : 'rgba(28, 28, 28, 0.9)';
+      ctx.fillRect(cellX + 1, cellY + 1, milW - 2, cellH - 2);
+      ctx.strokeStyle = isSelected ? '#2979ff' : (canAfford ? '#555' : '#333');
+      ctx.lineWidth = isSelected ? 2 : 1;
+      ctx.strokeRect(cellX + 1, cellY + 1, milW - 2, cellH - 2);
+
+      // Sprite (centered horizontally, bottom-anchored)
+      const cellCx = cellX + milW / 2;
+      const adjBaseY = isSelected ? spriteBaseY - selectedRaise : spriteBaseY;
+
+      if (spriteCategory === 'tower') {
+        // Use building sprite for tower
+        const towerImg = this.sprites?.getBuildingSprite(BuildingType.Tower, 0);
+        if (towerImg) {
+          const aspect = towerImg.width / towerImg.height;
+          const dh = spriteSize;
+          const dw = dh * aspect;
+          ctx.drawImage(towerImg, Math.round(cellCx - dw / 2), Math.round(adjBaseY - dh), dw, dh);
+        }
+      } else if (spriteCategory === 'miner') {
+        // Use building sprite for harvester hut
+        const hutImg = this.sprites?.getBuildingSprite(BuildingType.HarvesterHut, 0);
+        if (hutImg) {
+          const aspect = hutImg.width / hutImg.height;
+          const dh = spriteSize;
+          const dw = dh * aspect;
+          ctx.drawImage(hutImg, Math.round(cellCx - dw / 2), Math.round(adjBaseY - dh), dw, dh);
+        }
+      } else {
+        // Unit character sprite
+        const sprData = this.sprites?.getUnitSprite(race, spriteCategory, 0);
+        if (sprData) {
+          const [img, def] = sprData;
+          const frame = isSelected ? Math.floor(this.trayTick / 6) % def.cols : 0;
+          const aspect = def.frameW / def.frameH;
+          const dh = spriteSize;
+          const dw = dh * aspect;
+          drawSpriteFrame(ctx, img, def, frame, Math.round(cellCx - dw / 2), Math.round(adjBaseY - dh), dw, dh);
+        }
+      }
+
+      // Name
+      const textY = adjBaseY + 3;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = canAfford ? '#eee' : '#666';
+      ctx.font = 'bold 11px monospace';
+      ctx.fillText(name, cellCx, textY + 10);
+
+      // Cost or free text
+      if (freeText) {
+        ctx.fillStyle = '#4caf50'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(freeText, cellCx, textY + 24);
+      } else if (costParts && costParts.length > 0) {
+        drawCost(costParts, cellCx, textY + 24, canAfford);
+      }
+
+      // Key hint
+      ctx.fillStyle = '#444'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(`[${keyHint}]`, cellCx, cellY + cellH - 4);
+    };
 
     // === Miner button (col 0) ===
     const myHuts = this.game.state.buildings.filter(
@@ -1129,55 +1247,15 @@ export class InputHandler {
     const hutWood = Math.floor(hutBase.wood * hutMult);
     const hutStone = Math.floor(hutBase.stone * hutMult);
     const canAffordHut = player.gold >= hutGold && player.wood >= hutWood && player.stone >= hutStone && myHuts.length < 10;
-    const mx = 0;
-    ctx.fillStyle = 'rgba(40, 55, 20, 0.9)';
-    ctx.fillRect(mx + 1, milY + 1, milW - 2, milH - 2);
-    ctx.strokeStyle = canAffordHut ? '#8bc34a' : '#3a4a1a';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(mx + 1, milY + 1, milW - 2, milH - 2);
-
-    // Miner icon (pickaxe) in left column, scaled to cell
-    const mIcX = mx + iconColW / 2;
-    const mIcY = milY + milH / 2;
-    const ps = Math.min(iconColW * 0.4, milH * 0.28, 12);
-    ctx.strokeStyle = canAffordHut ? '#c5e1a5' : '#555';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(mIcX - ps, mIcY + ps);
-    ctx.lineTo(mIcX + ps * 0.65, mIcY - ps * 0.65);
-    ctx.lineTo(mIcX + ps, mIcY - ps * 0.15);
-    ctx.moveTo(mIcX + ps * 0.65, mIcY - ps * 0.65);
-    ctx.lineTo(mIcX + ps * 0.15, mIcY - ps);
-    ctx.stroke();
-    ctx.strokeStyle = canAffordHut ? '#8d6e63' : '#444';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(mIcX - ps, mIcY + ps);
-    ctx.lineTo(mIcX - ps * 0.2, mIcY + ps * 0.2);
-    ctx.stroke();
-
-    // Miner text in right column
-    const mTx = cellTextX(mx);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = canAffordHut ? '#c5e1a5' : '#555';
-    ctx.font = 'bold 12px monospace';
-    ctx.fillText('Miner', mTx, milY + 20);
     const hutCostItems: { val: number; type: 'g' | 'w' | 's' }[] = [];
     if (hutGold > 0) hutCostItems.push({ val: hutGold, type: 'g' });
     if (hutWood > 0) hutCostItems.push({ val: hutWood, type: 'w' });
     if (hutStone > 0) hutCostItems.push({ val: hutStone, type: 's' });
-    if (myHuts.length < 10) {
-      drawCost(hutCostItems, mTx, milY + 42, canAffordHut);
-    } else {
-      ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
-      ctx.fillText('MAX', mTx, milY + 42);
-    }
-    ctx.fillStyle = '#4a5a2a'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
-    ctx.fillText('[M]', mTx, milY + 56);
+    drawCell(0, false, canAffordHut, 'Miner', 'miner',
+      myHuts.length < 10 ? hutCostItems : null,
+      myHuts.length >= 10 ? 'MAX' : null, 'M');
 
     // === Military buttons (cols 1-4) ===
-    const race = player.race;
-    const raceColor = RACE_COLORS[race]?.primary ?? '#fff';
     for (let i = 0; i < BUILD_TRAY.length; i++) {
       const item = BUILD_TRAY[i];
       const bx = (i + 1) * milW;
@@ -1190,8 +1268,7 @@ export class InputHandler {
       let unitName: string;
       let category: 'melee' | 'ranged' | 'caster' | 'tower';
       if (item.type === BuildingType.Tower) {
-        unitName = 'Tower';
-        category = 'tower';
+        unitName = 'Tower'; category = 'tower';
       } else {
         const stats = UNIT_STATS[race]?.[item.type];
         unitName = stats?.name ?? item.label;
@@ -1199,80 +1276,36 @@ export class InputHandler {
           : item.type === BuildingType.RangedSpawner ? 'ranged' : 'caster';
       }
 
-      // Cell background & border
-      ctx.fillStyle = isSelected ? 'rgba(41, 121, 255, 0.28)' : 'rgba(28, 28, 28, 0.9)';
-      ctx.fillRect(bx + 1, milY + 1, milW - 2, milH - 2);
-      ctx.strokeStyle = isSelected ? '#2979ff' : (canAfford ? '#555' : '#333');
-      ctx.lineWidth = isSelected ? 2 : 1;
-      ctx.strokeRect(bx + 1, milY + 1, milW - 2, milH - 2);
-
-      // Icon in left column (vertically centered, scaled to cell size)
-      const sX = bx + iconColW / 2;
-      const sY = milY + milH / 2;
-      const iconR = Math.min(iconColW * 0.45, milH * 0.3, 14);
-      if (category !== 'tower' && this.currentRenderer) {
-        this.currentRenderer.drawUnitShape(ctx, sX, sY, iconR, race, category, Team.Bottom, raceColor);
-      } else {
-        // Tower icon
-        const tw = iconR * 1.2;
-        const th = iconR * 1.8;
-        ctx.fillStyle = raceColor;
-        ctx.fillRect(sX - tw / 2, sY - th / 2, tw, th);
-        ctx.fillRect(sX - tw / 2 - 2, sY - th / 2 - 2, tw + 4, 3);
-        ctx.strokeStyle = canAfford ? '#888' : '#444';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(sX - tw / 2, sY - th / 2, tw, th);
-      }
-
-      // Text in right column
-      const tx = cellTextX(bx);
-      ctx.textAlign = 'center';
-
-      // Unit name (only wrap if too wide for text column)
-      ctx.fillStyle = canAfford ? '#eee' : '#555';
-      const textColW = milW - iconColW - 6;
-      ctx.font = 'bold 12px monospace';
-      const nameW = ctx.measureText(unitName).width;
-      if (nameW > textColW && unitName.includes(' ')) {
-        const parts = unitName.split(' ');
-        ctx.font = 'bold 10px monospace';
-        ctx.fillText(parts[0], tx, milY + 15);
-        ctx.fillText(parts.slice(1).join(' '), tx, milY + 26);
-      } else {
-        ctx.fillText(unitName, tx, milY + 20);
-      }
-
-      // Cost (colorized per resource, same Y)
-      if (isFirstTowerFree) {
-        ctx.fillStyle = '#4caf50'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('FREE', tx, milY + 42);
-      } else {
-        const costItems: { val: number; type: 'g' | 'w' | 's' }[] = [];
+      const costItems: { val: number; type: 'g' | 'w' | 's' }[] = [];
+      if (!isFirstTowerFree) {
         if (cost.gold > 0) costItems.push({ val: cost.gold, type: 'g' });
         if (cost.wood > 0) costItems.push({ val: cost.wood, type: 'w' });
         if (cost.stone > 0) costItems.push({ val: cost.stone, type: 's' });
-        drawCost(costItems, tx, milY + 42, canAfford);
       }
 
-      // Key hint
-      ctx.fillStyle = '#444'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(`[${item.key}]`, tx, milY + 56);
+      drawCell(bx, isSelected, canAfford, unitName, category,
+        isFirstTowerFree ? null : costItems,
+        isFirstTowerFree ? 'FREE' : null, item.key);
     }
-    // Nuke button (col 5)
+
+    // === Nuke button (col 5) — 9-slice BigRedButton filling the cell ===
     const nukeAvail = player.nukeAvailable;
     const nukeX = (BUILD_TRAY.length + 1) * milW;
-    ctx.fillStyle = this.nukeTargeting ? 'rgba(255, 50, 0, 0.35)' : 'rgba(28, 28, 28, 0.9)';
-    ctx.fillRect(nukeX + 1, milY + 1, milW - 2, milH - 2);
-    ctx.strokeStyle = this.nukeTargeting ? '#ff5722' : (nukeAvail ? '#ff5722' : '#333');
-    ctx.lineWidth = this.nukeTargeting ? 2 : 1;
-    ctx.strokeRect(nukeX + 1, milY + 1, milW - 2, milH - 2);
+    const nukePad = 2;
+    if (nukeAvail) {
+      this.ui.drawBigRedButton(ctx, nukeX + nukePad, milY + nukePad, milW - nukePad * 2, milH - nukePad * 2, this.nukeTargeting);
+    } else {
+      ctx.globalAlpha = 0.3;
+      this.ui.drawBigRedButton(ctx, nukeX + nukePad, milY + nukePad, milW - nukePad * 2, milH - nukePad * 2);
+      ctx.globalAlpha = 1;
+    }
     ctx.textAlign = 'center';
-    ctx.fillStyle = nukeAvail ? '#ff5722' : '#555';
-    ctx.font = 'bold 17px monospace';
-    ctx.fillText('NUKE', nukeX + milW / 2, milY + 26);
-    ctx.fillStyle = '#555';
-    ctx.font = '12px monospace';
-    ctx.fillText('[N]', nukeX + milW / 2, milY + 50);
+    ctx.fillStyle = nukeAvail ? '#fff' : '#888';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('NUKE', nukeX + milW / 2, milY + milH / 2 + 4);
+    ctx.fillStyle = '#888';
+    ctx.font = '9px monospace';
+    ctx.fillText('[N]', nukeX + milW / 2, milY + milH - 6);
 
     if (quickChatCdMs > 0) {
       ctx.textAlign = 'left';
@@ -1321,21 +1354,20 @@ export class InputHandler {
     }
 
     if (this.settingsOpen) {
-      const sx = W - 220;
-      const sy = milY - 124;
-      ctx.fillStyle = 'rgba(0,0,0,0.88)';
-      ctx.fillRect(sx, sy, 200, 226);
-      ctx.strokeStyle = '#2979ff';
-      ctx.strokeRect(sx, sy, 200, 226);
-      ctx.fillStyle = '#bbdefb';
+      const sr = this.getSettingsButtonRect();
+      const sx = sr.x + sr.w - 200;
+      const sy = sr.y + sr.h + 4;
+      // Settings container - WoodTable 9-slice
+      if (!this.ui.drawWoodTable(ctx, sx, sy, 200, 226)) {
+        ctx.fillStyle = 'rgba(0,0,0,0.88)';
+        ctx.fillRect(sx, sy, 200, 226);
+      }
+      ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px monospace';
       ctx.fillText('Settings', sx + 8, sy + 16);
-      ctx.fillStyle = 'rgba(20,20,20,0.9)';
-      ctx.fillRect(sx + 176, sy + 4, 20, 16);
-      ctx.strokeStyle = '#9bb7ff';
-      ctx.strokeRect(sx + 176, sy + 4, 20, 16);
-      ctx.fillStyle = '#9bb7ff';
-      ctx.fillText('X', sx + 183, sy + 16);
+      // Close button - X icon
+      const closeSize = 16;
+      this.ui.drawIcon(ctx, 'close', sx + 178, sy + 4, closeSize);
       ctx.fillStyle = 'rgba(20,20,20,0.9)';
       ctx.fillRect(sx + 8, sy + 34, 184, 24);
       ctx.strokeStyle = '#9bb7ff';
@@ -1692,7 +1724,7 @@ export class InputHandler {
     const now = Date.now();
     if (!this.devBalanceCache.data || now - this.devBalanceCache.lastRefresh > 2000) {
       try {
-        const raw = localStorage.getItem('asciiwars.balanceLog');
+        const raw = localStorage.getItem('spawnwars.balanceLog');
         this.devBalanceCache.data = raw ? JSON.parse(raw) : [];
       } catch { this.devBalanceCache.data = []; }
       this.devBalanceCache.lastRefresh = now;
@@ -1791,45 +1823,57 @@ export class InputHandler {
   private getSpecialDesc(race: Race, type: BuildingType): string {
     if (type === BuildingType.Tower) {
       const descs: Record<Race, string> = {
-        [Race.Surge]: 'Chain lightning',
-        [Race.Tide]: 'AoE slow',
-        [Race.Ember]: 'Burn splash',
-        [Race.Bastion]: 'Shield allies',
-        [Race.Shade]: 'Poison on hit',
-        [Race.Thorn]: 'Regen aura',
+        [Race.Crown]: 'Shield allies',
+        [Race.Horde]: 'Knockback blast',
+        [Race.Goblins]: 'Poison splash',
+        [Race.Oozlings]: 'Chain lightning',
+        [Race.Demon]: 'Burn splash',
+        [Race.Deep]: 'AoE slow',
+        [Race.Wild]: 'Poison on hit',
+        [Race.Geists]: 'Lifesteal bolt',
+        [Race.Tenders]: 'Regen aura',
       };
       return descs[race] ?? '';
     }
     if (type === BuildingType.CasterSpawner) {
       const descs: Record<Race, string> = {
-        [Race.Surge]: 'Haste pulse + AoE',
-        [Race.Tide]: 'Cleanse + AoE slow',
-        [Race.Ember]: 'Pure burst AoE',
-        [Race.Bastion]: 'Shield allies',
-        [Race.Shade]: 'Lifesteal heal + AoE',
-        [Race.Thorn]: 'Heal aura + AoE',
+        [Race.Crown]: 'Shield allies',
+        [Race.Horde]: 'Haste pulse + AoE',
+        [Race.Goblins]: 'Hex slow + AoE',
+        [Race.Oozlings]: 'Haste pulse + AoE',
+        [Race.Demon]: 'Pure burst AoE',
+        [Race.Deep]: 'Cleanse + AoE slow',
+        [Race.Wild]: 'Haste pulse + AoE',
+        [Race.Geists]: 'Lifesteal heal + AoE',
+        [Race.Tenders]: 'Heal aura + AoE',
       };
       return descs[race] ?? '';
     }
     if (type === BuildingType.MeleeSpawner) {
       const descs: Record<Race, string> = {
-        [Race.Surge]: 'Fast attack',
-        [Race.Tide]: 'Slow on hit',
-        [Race.Ember]: 'High damage',
-        [Race.Bastion]: 'High HP tank',
-        [Race.Shade]: 'Poison + lifesteal',
-        [Race.Thorn]: 'Slow on hit + tanky',
+        [Race.Crown]: 'Dmg reduction',
+        [Race.Horde]: 'Knockback',
+        [Race.Goblins]: 'Fast + cheap',
+        [Race.Oozlings]: 'Swarm (x2)',
+        [Race.Demon]: 'Glass cannon + burn',
+        [Race.Deep]: 'Slow on hit + tank',
+        [Race.Wild]: 'Poison on hit',
+        [Race.Geists]: 'Burn + lifesteal',
+        [Race.Tenders]: 'Regen + slow',
       };
       return descs[race] ?? '';
     }
     if (type === BuildingType.RangedSpawner) {
       const descs: Record<Race, string> = {
-        [Race.Surge]: 'Long range',
-        [Race.Tide]: 'Slow projectile',
-        [Race.Ember]: 'Burn projectile',
-        [Race.Bastion]: 'Siege range',
-        [Race.Shade]: 'Poison projectile',
-        [Race.Thorn]: 'Slow projectile',
+        [Race.Crown]: 'Balanced archer',
+        [Race.Horde]: 'Heavy shot',
+        [Race.Goblins]: 'Burn projectile',
+        [Race.Oozlings]: 'Swarm spitter (x2)',
+        [Race.Demon]: 'High dmg, fragile',
+        [Race.Deep]: 'Slow projectile',
+        [Race.Wild]: 'Poison projectile',
+        [Race.Geists]: 'Lifesteal shot',
+        [Race.Tenders]: 'Slow projectile',
       };
       return descs[race] ?? '';
     }

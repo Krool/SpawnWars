@@ -5,6 +5,7 @@ import { Renderer } from '../rendering/Renderer';
 import { InputHandler } from '../ui/InputHandler';
 import { SoundManager } from '../audio/SoundManager';
 import { runAllBotAI, createBotContext, BotContext } from '../simulation/BotAI';
+import { UIAssets } from '../rendering/UIAssets';
 
 export class Game {
   state: GameState;
@@ -18,9 +19,9 @@ export class Game {
 
   private botCtx: BotContext = createBotContext();
 
-  constructor(canvas: HTMLCanvasElement, playerRace: Race = Race.Surge) {
+  constructor(canvas: HTMLCanvasElement, playerRace: Race = Race.Crown, ui?: UIAssets) {
     // Pick bot races: fill remaining 3 slots from races other than player's
-    const allRaces = [Race.Surge, Race.Tide, Race.Ember, Race.Bastion, Race.Shade, Race.Thorn];
+    const allRaces = [Race.Crown, Race.Horde, Race.Goblins, Race.Oozlings, Race.Demon, Race.Deep, Race.Wild, Race.Geists, Race.Tenders];
     const otherRaces = allRaces.filter(r => r !== playerRace);
     // Shuffle to get variety
     for (let i = otherRaces.length - 1; i > 0; i--) {
@@ -35,8 +36,8 @@ export class Game {
       { race: otherRaces[2], isBot: true },        // P3 - bot enemy
     ]);
 
-    this.renderer = new Renderer(canvas);
-    this.input = new InputHandler(this, canvas, this.renderer.camera);
+    this.renderer = new Renderer(canvas, ui);
+    this.input = new InputHandler(this, canvas, this.renderer.camera, ui, this.renderer.sprites);
     this.sounds = new SoundManager();
 
     this.loop = new GameLoop(

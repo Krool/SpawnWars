@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Spawn Wars - Sprite Style Preview</title>
+<style>
+  body { background: #1a1a2e; color: #eee; font-family: monospace; margin: 0; padding: 20px; }
+  h1 { color: #ffd700; text-align: center; }
+  h2 { color: #88f; margin-top: 30px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+  h3 { color: #aaa; margin: 10px 0 5px; }
+  .row { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+  .sprite-box { text-align: center; }
+  .sprite-box .label { font-size: 10px; color: #888; margin-top: 2px; }
+  canvas#game { border: 1px solid #333; display: block; margin: 20px auto; image-rendering: pixelated; }
+  .controls { text-align: center; margin: 10px; }
+  .controls button { background: #333; color: #eee; border: 1px solid #555; padding: 5px 15px; cursor: pointer; margin: 2px; }
+  .controls button:hover { background: #555; }
+  .controls button.active { background: #446; border-color: #88f; }
+  .section { background: #111; border: 1px solid #333; border-radius: 8px; padding: 15px; margin: 15px 0; }
+  .scale-note { color: #ff8; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>Sprite Style Preview - All Packs at Game Scale</h1>
+<p class="scale-note" style="text-align:center">
+  Game tiles = 16px. Units render at ~32px (2 tiles). Buildings at ~48-64px (3-4 tiles).
+  Toggle scale below. All sprites animate.
+</p>
+
+<div class="controls">
+  <b>Display Scale:</b>
+  <button onclick="setScale(1)" id="s1">1x (16px tile)</button>
+  <button onclick="setScale(2)" class="active" id="s2">2x (32px tile)</button>
+  <button onclick="setScale(3)" id="s3">3x (48px tile)</button>
+</div>
+
+<canvas id="game" width="1200" height="900"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let SCALE = 2;
+const TILE = 16;
+let frame = 0;
+let allSprites = [];
+
+function setScale(s) {
+  SCALE = s;
+  document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+  document.getElementById('s' + s).classList.add('active');
+}
+
+// Sprite loader
+function loadImg(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => { console.warn('Failed: ' + src); resolve(null); };
+    img.src = src;
+  });
+}
+
+const BASE_TS = 'src/assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)';
+const BASE_EN = 'src/assets/images/Tiny Swords (Enemy Pack)/Tiny Swords (Enemy Pack)/Enemy Pack';
+const BASE_RPG = 'src/assets/images/RPG HEROES ENEMIES/[CHARACTER PACK] RPG HEROES & ENEMIES';
+const BASE_SLIME = 'src/assets/images/SLIMES BLOBS TENTACLES/[CHARACTER PACK] SLIMES, BLOBS & TENTACLES';
+const BASE_OB = 'src/assets/images/OVERBURN AssetPack/OVERBURN AssetPack';
+
+// Each sprite: { img, frameW, frameH, frames, displaySize (in tiles) }
+const spriteManifest = [
+  // === CROWN (Blue Tiny Swords) ===
+  { name: 'Crown Melee', src: `${BASE_TS}/Units/Blue Units/Warrior/Warrior_Idle.png`, frames: 8, tiles: 2, group: 'crown' },
+  { name: 'Crown Ranged', src: `${BASE_TS}/Units/Blue Units/Archer/Archer_Idle.png`, frames: 6, tiles: 2, group: 'crown' },
+  { name: 'Crown Caster', src: `${BASE_TS}/Units/Blue Units/Monk/Idle.png`, frames: 6, tiles: 2, group: 'crown' },
+  { name: 'Crown Pawn', src: `${BASE_TS}/Units/Blue Units/Pawn/Pawn_Idle Gold.png`, frames: 8, tiles: 1.5, group: 'crown' },
+
+  // === EMBER (Red Tiny Swords) ===
+  { name: 'Ember Melee', src: `${BASE_TS}/Units/Red Units/Warrior/Warrior_Idle.png`, frames: 8, tiles: 2, group: 'ember' },
+  { name: 'Ember Ranged', src: `${BASE_TS}/Units/Red Units/Archer/Archer_Idle.png`, frames: 6, tiles: 2, group: 'ember' },
+  { name: 'Ember Caster', src: `${BASE_TS}/Units/Red Units/Monk/Idle.png`, frames: 6, tiles: 2, group: 'ember' },
+  { name: 'Ember Pawn', src: `${BASE_TS}/Units/Red Units/Pawn/Pawn_Idle Meat.png`, frames: 8, tiles: 1.5, group: 'ember' },
+
+  // === DEEP (Black Tiny Swords) ===
+  { name: 'Deep Melee', src: `${BASE_TS}/Units/Black Units/Warrior/Warrior_Idle.png`, frames: 8, tiles: 2, group: 'deep' },
+  { name: 'Deep Ranged', src: `${BASE_TS}/Units/Black Units/Archer/Archer_Idle.png`, frames: 6, tiles: 2, group: 'deep' },
+  { name: 'Deep Caster', src: `${BASE_TS}/Units/Black Units/Monk/Idle.png`, frames: 6, tiles: 2, group: 'deep' },
+  { name: 'Deep Pawn', src: `${BASE_TS}/Units/Black Units/Pawn/Pawn_Idle Pickaxe.png`, frames: 8, tiles: 1.5, group: 'deep' },
+
+  // === HORDE (RPG Orcs -> Trolls -> Demons for upgrades) ===
+  { name: 'Horde Melee T0', src: `${BASE_RPG}/01_Orcs/01_Orcs_Tiny_Knight_Idle_1x1.png`, frames: 1, tiles: 2, group: 'horde' },
+  { name: 'Horde Melee T1', src: `${BASE_RPG}/02_Trolls/02_Trolls_Tiny_Knight_Idle_1x1.png`, frames: 1, tiles: 2.2, group: 'horde' },
+  { name: 'Horde Melee T2 (Ogre)', src: `${BASE_EN}/Troll/Troll_Idle.png`, frames: 12, tiles: 2.8, group: 'horde' },
+  { name: 'Horde Ranged T0', src: `${BASE_RPG}/01_Orcs/01_Orcs_Tiny_Archer_Idle_1x1.png`, frames: 1, tiles: 2, group: 'horde' },
+  { name: 'Horde Ranged T1', src: `${BASE_RPG}/02_Trolls/02_Trolls_Tiny_Archer_Idle_1x1.png`, frames: 1, tiles: 2.2, group: 'horde' },
+  { name: 'Horde Ranged T2', src: `${BASE_RPG}/03_Demons/03_Demons_Tiny_Archer_Idle_1x1.png`, frames: 1, tiles: 2.4, group: 'horde' },
+  { name: 'Horde Caster T0', src: `${BASE_RPG}/01_Orcs/01_Orcs_Tiny_Dwarf_Idle_1x1.png`, frames: 1, tiles: 2, group: 'horde' },
+  { name: 'Horde Caster T1', src: `${BASE_RPG}/02_Trolls/02_Trolls_Tiny_Dwarf_Idle_1x1.png`, frames: 1, tiles: 2.2, group: 'horde' },
+  { name: 'Horde Caster T2', src: `${BASE_RPG}/03_Demons/03_Demons_Tiny_Dwarf_Idle_1x1.png`, frames: 1, tiles: 2.4, group: 'horde' },
+
+  // === WILD (Enemy Pack creatures) ===
+  { name: 'Wild Melee (Spider)', src: `${BASE_EN}/Spider/Spider_Idle.png`, frames: 8, tiles: 2.5, group: 'wild' },
+  { name: 'Wild Ranged (Gnoll)', src: `${BASE_EN}/Gnoll/Gnoll_Idle.png`, frames: 6, tiles: 2, group: 'wild' },
+  { name: 'Wild Caster (Shaman)', src: `${BASE_EN}/Shaman/Shaman_Idle.png`, frames: 8, tiles: 2, group: 'wild' },
+  { name: 'Wild Alt: Snake', src: `${BASE_EN}/Snake/Snake_Idle.png`, frames: 8, tiles: 2, group: 'wild' },
+  { name: 'Wild Alt: Bear', src: `${BASE_EN}/Bear/Bear_Idle.png`, frames: 8, tiles: 2.5, group: 'wild' },
+  { name: 'Wild Alt: Lizard', src: `${BASE_EN}/Lizard/Lizard_Idle.png`, frames: 7, tiles: 2, group: 'wild' },
+
+  // === SHADE (Slimes + Tentacles) ===
+  { name: 'Shade Melee T0 (Slime1)', src: `${BASE_SLIME}/04_PURPLE/Slime_Lvl01_Idle_1x1.png`, frames: 1, tiles: 2, group: 'shade' },
+  { name: 'Shade Melee T1 (Slime2)', src: `${BASE_SLIME}/04_PURPLE/Slime_Lvl02_Idle_1x1.png`, frames: 1, tiles: 2.2, group: 'shade' },
+  { name: 'Shade Melee T2 (Slime3)', src: `${BASE_SLIME}/04_PURPLE/Slime_Lvl03_Idle_1x1.png`, frames: 1, tiles: 2.5, group: 'shade' },
+  { name: 'Shade Ranged (Slime4)', src: `${BASE_SLIME}/04_PURPLE/Slime_Lvl04_Idle_1x1.png`, frames: 1, tiles: 2.2, group: 'shade' },
+  { name: 'Shade Caster (Slime6)', src: `${BASE_SLIME}/04_PURPLE/Slime_Lvl06_Idle_1x1.png`, frames: 1, tiles: 2.8, group: 'shade' },
+  { name: 'Shade Tower (Tentacle)', src: `${BASE_SLIME}/04_PURPLE/Tentacle_Idle_8x1.png`, frames: 8, tiles: 3, group: 'shade' },
+
+  // === BUILDINGS (Tiny Swords - Blue as example) ===
+  { name: 'Castle (HQ)', src: `${BASE_TS}/Buildings/Blue Buildings/Castle.png`, frames: 1, tiles: 5, group: 'buildings' },
+  { name: 'Barracks (Melee)', src: `${BASE_TS}/Buildings/Blue Buildings/Barracks.png`, frames: 1, tiles: 3.5, group: 'buildings' },
+  { name: 'Archery (Ranged)', src: `${BASE_TS}/Buildings/Blue Buildings/Archery.png`, frames: 1, tiles: 3.5, group: 'buildings' },
+  { name: 'Monastery (Caster)', src: `${BASE_TS}/Buildings/Blue Buildings/Monastery.png`, frames: 1, tiles: 3.5, group: 'buildings' },
+  { name: 'Tower', src: `${BASE_TS}/Buildings/Blue Buildings/Tower.png`, frames: 1, tiles: 3, group: 'buildings' },
+  { name: 'House (Hut)', src: `${BASE_TS}/Buildings/Blue Buildings/House1.png`, frames: 1, tiles: 2.5, group: 'buildings' },
+
+  // === RESOURCES ===
+  { name: 'Gold Stone', src: `${BASE_TS}/Terrain/Resources/Gold/Gold Stones/Gold Stone 1.png`, frames: 1, tiles: 2, group: 'resources' },
+  { name: 'Gold Pickup', src: `${BASE_TS}/Terrain/Resources/Gold/Gold Resource/Gold_Resource.png`, frames: 1, tiles: 1, group: 'resources' },
+  { name: 'Tree', src: `${BASE_TS}/Terrain/Resources/Wood/Trees/Tree1.png`, frames: 8, tiles: 3, group: 'resources' },
+  { name: 'Wood Pickup', src: `${BASE_TS}/Terrain/Resources/Wood/Wood Resource/Wood Resource.png`, frames: 1, tiles: 1, group: 'resources' },
+  { name: 'Sheep', src: `${BASE_TS}/Terrain/Resources/Meat/Sheep/Sheep_Idle.png`, frames: 6, tiles: 1.5, group: 'resources' },
+  { name: 'Meat Pickup', src: `${BASE_TS}/Terrain/Resources/Meat/Meat Resource/Meat Resource.png`, frames: 1, tiles: 1, group: 'resources' },
+
+  // === FX ===
+  { name: 'Explosion', src: `${BASE_TS}/Particle FX/Explosion_01.png`, frames: 9, tiles: 2, group: 'fx' },
+  { name: 'Fire', src: `${BASE_TS}/Particle FX/Fire_01.png`, frames: 8, tiles: 1, group: 'fx' },
+  { name: 'Water Splash', src: `${BASE_TS}/Particle FX/Water Splash.png`, frames: 9, tiles: 2, group: 'fx' },
+  { name: 'Arrow', src: `${BASE_TS}/Units/Blue Units/Archer/Arrow.png`, frames: 1, tiles: 1, group: 'fx' },
+  { name: 'Shaman Proj', src: `${BASE_EN}/Shaman/Shaman_Projectile.png`, frames: 3, tiles: 1, group: 'fx' },
+  { name: 'OVERBURN Orange', src: `${BASE_OB}/00 Yellow-Orange FX/FX_Fire00_FlameCartoon_M01_7x1.png`, frames: 7, tiles: 1.5, group: 'fx' },
+  { name: 'OVERBURN Blue', src: `${BASE_OB}/01 Blue FX/FX_Fire01_FlameCartoon_M01_7x1.png`, frames: 7, tiles: 1.5, group: 'fx' },
+  { name: 'OVERBURN Purple', src: `${BASE_OB}/03 Purple FX/FX_Fire03_FlameCartoon_M01_7x1.png`, frames: 7, tiles: 1.5, group: 'fx' },
+  { name: 'OVERBURN Green', src: `${BASE_OB}/02 Green FX/FX_Fire02_FlameCartoon_M01_7x1.png`, frames: 7, tiles: 1.5, group: 'fx' },
+];
+
+const loaded = {};
+
+async function loadAll() {
+  const promises = spriteManifest.map(async (s) => {
+    const img = await loadImg(s.src);
+    if (img) {
+      loaded[s.name] = {
+        img,
+        frameW: Math.floor(img.width / s.frames),
+        frameH: img.height,
+        frames: s.frames,
+        tiles: s.tiles,
+        group: s.group,
+      };
+    }
+  });
+  await Promise.all(promises);
+  console.log(`Loaded ${Object.keys(loaded).length}/${spriteManifest.length} sprites`);
+  requestAnimationFrame(draw);
+}
+
+const GROUP_COLORS = {
+  crown: '#2979ff',
+  ember: '#ff1744',
+  deep: '#546e7a',
+  horde: '#4caf50',
+  wild: '#ff9100',
+  shade: '#9c27b0',
+  buildings: '#ffd700',
+  resources: '#8bc34a',
+  fx: '#ff5722',
+};
+
+const GROUP_ORDER = ['crown', 'ember', 'deep', 'horde', 'wild', 'shade', 'buildings', 'resources', 'fx'];
+const GROUP_LABELS = {
+  crown: 'CROWN (Blue TS) - Gold:2 Wood:1',
+  ember: 'EMBER (Red TS) - Gold:2 Meat:1',
+  deep: 'DEEP (Black TS) - Wood:2 Gold:1',
+  horde: 'HORDE (RPG Orcs->Trolls->Ogre) - Meat:2 Wood:1',
+  wild: 'WILD (TS Enemy Pack) - Meat:2 Gold:1',
+  shade: 'SHADE (Slimes+Tentacles) - Wood:2 Meat:1',
+  buildings: 'BUILDINGS (Tiny Swords)',
+  resources: 'RESOURCES (Gold, Wood, Meat/Sheep)',
+  fx: 'FX & PROJECTILES',
+};
+
+let lastTime = 0;
+const FPS = 8;
+
+function draw(time) {
+  if (time - lastTime > 1000 / FPS) {
+    frame++;
+    lastTime = time;
+  }
+
+  const T = TILE * SCALE;
+
+  // Resize canvas based on content
+  canvas.width = Math.max(1200, 80 * T);
+
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw grid for scale reference
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  for (let x = 0; x < canvas.width; x += T) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y < canvas.height; y += T) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+
+  let curY = 10;
+
+  for (const group of GROUP_ORDER) {
+    const sprites = Object.entries(loaded).filter(([n, s]) => s.group === group);
+    if (sprites.length === 0) continue;
+
+    // Group header
+    ctx.fillStyle = GROUP_COLORS[group] || '#fff';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText(GROUP_LABELS[group] || group.toUpperCase(), 10, curY + 14);
+    curY += 22;
+
+    let curX = 10;
+    let maxH = 0;
+
+    for (const [name, s] of sprites) {
+      const displayW = s.tiles * T;
+      const displayH = (s.frameH / s.frameW) * displayW;
+
+      // Wrap to next line
+      if (curX + displayW + 10 > canvas.width) {
+        curY += maxH + 25;
+        curX = 10;
+        maxH = 0;
+      }
+
+      const f = frame % s.frames;
+
+      ctx.imageSmoothingEnabled = (s.frameW > 64); // smooth for HD, pixelated for pixel art
+
+      ctx.drawImage(
+        s.img,
+        f * s.frameW, 0, s.frameW, s.frameH,
+        curX, curY, displayW, displayH
+      );
+
+      // Label
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '9px monospace';
+      const labelText = name.replace(group.charAt(0).toUpperCase() + group.slice(1) + ' ', '');
+      ctx.fillText(labelText, curX, curY + displayH + 10);
+
+      curX += displayW + 15;
+      maxH = Math.max(maxH, displayH);
+    }
+
+    curY += maxH + 30;
+  }
+
+  canvas.height = curY + 20;
+
+  requestAnimationFrame(draw);
+}
+
+loadAll();
+</script>
+</body>
+</html>

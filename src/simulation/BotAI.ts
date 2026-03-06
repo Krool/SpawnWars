@@ -25,41 +25,68 @@ interface RaceProfile {
 }
 
 const RACE_PROFILES: Record<Race, RaceProfile> = {
-  [Race.Surge]: {
+  // Crown: balanced, shield + sustain
+  [Race.Crown]: {
     earlyMelee: 1, earlyRanged: 1, earlyHuts: 2, earlyTowers: 0,
     midMelee: 2, midRanged: 2, midCasters: 1, midTowers: 1, midHuts: 3,
     lateTowers: 2, alleyTowers: 2,
+    meleeUpgradeBias: 'B', rangedUpgradeBias: 'C', casterUpgradeBias: 'B', towerUpgradeBias: 'C',
+  },
+  // Horde: brute force, melee heavy
+  [Race.Horde]: {
+    earlyMelee: 2, earlyRanged: 0, earlyHuts: 2, earlyTowers: 0,
+    midMelee: 3, midRanged: 1, midCasters: 1, midTowers: 1, midHuts: 4,
+    lateTowers: 2, alleyTowers: 2,
+    meleeUpgradeBias: 'C', rangedUpgradeBias: 'B', casterUpgradeBias: 'C', towerUpgradeBias: 'B',
+  },
+  // Goblins: fast + cheap, ranged focus with poison
+  [Race.Goblins]: {
+    earlyMelee: 1, earlyRanged: 1, earlyHuts: 2, earlyTowers: 0,
+    midMelee: 2, midRanged: 2, midCasters: 1, midTowers: 1, midHuts: 3,
+    lateTowers: 1, alleyTowers: 2,
     meleeUpgradeBias: 'C', rangedUpgradeBias: 'C', casterUpgradeBias: 'C', towerUpgradeBias: 'C',
   },
-  [Race.Tide]: {
-    earlyMelee: 1, earlyRanged: 0, earlyHuts: 2, earlyTowers: 1,
-    midMelee: 2, midRanged: 1, midCasters: 1, midTowers: 2, midHuts: 4,
-    lateTowers: 2, alleyTowers: 3,
-    meleeUpgradeBias: 'B', rangedUpgradeBias: 'C', casterUpgradeBias: 'C', towerUpgradeBias: 'C',
+  // Oozlings: swarm, lots of spawners
+  [Race.Oozlings]: {
+    earlyMelee: 2, earlyRanged: 1, earlyHuts: 1, earlyTowers: 0,
+    midMelee: 3, midRanged: 2, midCasters: 1, midTowers: 1, midHuts: 3,
+    lateTowers: 2, alleyTowers: 2,
+    meleeUpgradeBias: 'C', rangedUpgradeBias: 'C', casterUpgradeBias: 'C', towerUpgradeBias: 'C',
   },
-  [Race.Ember]: {
+  // Demon: glass cannon, aggressive
+  [Race.Demon]: {
     earlyMelee: 2, earlyRanged: 0, earlyHuts: 1, earlyTowers: 0,
     midMelee: 2, midRanged: 1, midCasters: 2, midTowers: 1, midHuts: 3,
     lateTowers: 1, alleyTowers: 2,
     meleeUpgradeBias: 'C', rangedUpgradeBias: 'B', casterUpgradeBias: 'B', towerUpgradeBias: 'B',
   },
-  [Race.Bastion]: {
-    earlyMelee: 2, earlyRanged: 0, earlyHuts: 2, earlyTowers: 0,
-    midMelee: 3, midRanged: 1, midCasters: 1, midTowers: 1, midHuts: 4,
-    lateTowers: 2, alleyTowers: 2,
-    meleeUpgradeBias: 'B', rangedUpgradeBias: 'B', casterUpgradeBias: 'B', towerUpgradeBias: 'B',
+  // Deep: tank + control, tower heavy
+  [Race.Deep]: {
+    earlyMelee: 1, earlyRanged: 0, earlyHuts: 2, earlyTowers: 1,
+    midMelee: 2, midRanged: 1, midCasters: 1, midTowers: 2, midHuts: 4,
+    lateTowers: 2, alleyTowers: 3,
+    meleeUpgradeBias: 'B', rangedUpgradeBias: 'C', casterUpgradeBias: 'C', towerUpgradeBias: 'C',
   },
-  [Race.Shade]: {
+  // Wild: aggro + poison, balanced offense
+  [Race.Wild]: {
     earlyMelee: 1, earlyRanged: 1, earlyHuts: 2, earlyTowers: 0,
     midMelee: 2, midRanged: 2, midCasters: 1, midTowers: 1, midHuts: 3,
     lateTowers: 2, alleyTowers: 2,
     meleeUpgradeBias: 'C', rangedUpgradeBias: 'B', casterUpgradeBias: 'C', towerUpgradeBias: 'C',
   },
-  [Race.Thorn]: {
+  // Geists: undying, lifesteal, melee focus
+  [Race.Geists]: {
+    earlyMelee: 2, earlyRanged: 0, earlyHuts: 2, earlyTowers: 0,
+    midMelee: 3, midRanged: 1, midCasters: 1, midTowers: 1, midHuts: 4,
+    lateTowers: 2, alleyTowers: 2,
+    meleeUpgradeBias: 'B', rangedUpgradeBias: 'B', casterUpgradeBias: 'B', towerUpgradeBias: 'B',
+  },
+  // Tenders: regen + healing, tower defense
+  [Race.Tenders]: {
     earlyMelee: 2, earlyRanged: 0, earlyHuts: 2, earlyTowers: 0,
     midMelee: 3, midRanged: 1, midCasters: 1, midTowers: 1, midHuts: 4,
     lateTowers: 2, alleyTowers: 3,
-    meleeUpgradeBias: 'C', rangedUpgradeBias: 'C', casterUpgradeBias: 'C', towerUpgradeBias: 'C',
+    meleeUpgradeBias: 'B', rangedUpgradeBias: 'C', casterUpgradeBias: 'C', towerUpgradeBias: 'C',
   },
 };
 
@@ -338,12 +365,12 @@ function botPickUpgrade(
     return bias;
   }
   if (building.upgradePath[1] === 'B') {
-    const preferOffense = race === Race.Surge || race === Race.Ember || race === Race.Shade;
+    const preferOffense = race === Race.Demon || race === Race.Wild || race === Race.Goblins || race === Race.Oozlings;
     let choice = preferOffense ? 'E' : 'D';
     if (deviate) choice = choice === 'D' ? 'E' : 'D';
     return choice;
   } else {
-    const preferUtility = race === Race.Surge || race === Race.Tide || race === Race.Thorn;
+    const preferUtility = race === Race.Crown || race === Race.Deep || race === Race.Tenders;
     let choice = preferUtility ? 'F' : 'G';
     if (deviate) choice = choice === 'F' ? 'G' : 'F';
     return choice;
@@ -422,15 +449,18 @@ function botManageHarvesters(
   let primaryRes: HarvesterAssignment;
   let secondaryRes: HarvesterAssignment;
   switch (race) {
-    case Race.Surge:   primaryRes = HarvesterAssignment.BaseGold; secondaryRes = HarvesterAssignment.Stone; break;
-    case Race.Shade:   primaryRes = HarvesterAssignment.BaseGold; secondaryRes = HarvesterAssignment.Wood; break;
-    case Race.Tide:    primaryRes = HarvesterAssignment.Wood;     secondaryRes = HarvesterAssignment.BaseGold; break;
-    case Race.Bastion: primaryRes = HarvesterAssignment.Stone;    secondaryRes = HarvesterAssignment.BaseGold; break;
-    case Race.Thorn:   primaryRes = HarvesterAssignment.Wood;     secondaryRes = HarvesterAssignment.Stone; break;
-    case Race.Ember:   primaryRes = HarvesterAssignment.Stone;    secondaryRes = HarvesterAssignment.Wood; break;
-    default:           primaryRes = HarvesterAssignment.BaseGold; secondaryRes = HarvesterAssignment.Wood; break;
+    case Race.Crown:    primaryRes = HarvesterAssignment.BaseGold; secondaryRes = HarvesterAssignment.Wood; break;
+    case Race.Horde:    primaryRes = HarvesterAssignment.BaseGold; secondaryRes = HarvesterAssignment.Stone; break;
+    case Race.Goblins:  primaryRes = HarvesterAssignment.BaseGold; secondaryRes = HarvesterAssignment.Wood; break;
+    case Race.Oozlings: primaryRes = HarvesterAssignment.BaseGold; secondaryRes = HarvesterAssignment.Stone; break;
+    case Race.Demon:    primaryRes = HarvesterAssignment.Stone;    secondaryRes = HarvesterAssignment.Wood; break;
+    case Race.Deep:     primaryRes = HarvesterAssignment.Wood;     secondaryRes = HarvesterAssignment.BaseGold; break;
+    case Race.Wild:     primaryRes = HarvesterAssignment.Wood;     secondaryRes = HarvesterAssignment.Stone; break;
+    case Race.Geists:   primaryRes = HarvesterAssignment.Stone;    secondaryRes = HarvesterAssignment.BaseGold; break;
+    case Race.Tenders:  primaryRes = HarvesterAssignment.Wood;     secondaryRes = HarvesterAssignment.BaseGold; break;
+    default:            primaryRes = HarvesterAssignment.BaseGold; secondaryRes = HarvesterAssignment.Wood; break;
   }
-  const primaryWeight = (race === Race.Surge) ? 3 : 2;
+  const primaryWeight = 2;
 
   const resForAssignment = (a: HarvesterAssignment): number => {
     if (a === HarvesterAssignment.BaseGold || a === HarvesterAssignment.Center) return player.gold;

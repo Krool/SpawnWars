@@ -14,10 +14,10 @@ function runTick(state: ReturnType<typeof createInitialState>, commands: GameCom
 
 function testTeamAlleyOccupancy(): void {
   const state = createInitialState([
-    { race: Race.Surge, isBot: false },
-    { race: Race.Tide, isBot: true },
-    { race: Race.Ember, isBot: true },
-    { race: Race.Bastion, isBot: true },
+    { race: Race.Crown, isBot: false },
+    { race: Race.Horde, isBot: true },
+    { race: Race.Demon, isBot: true },
+    { race: Race.Deep, isBot: true },
   ]);
   const bottomAlley = getTeamAlleyOrigin(Team.Bottom);
   const topAlley = getTeamAlleyOrigin(Team.Top);
@@ -51,10 +51,10 @@ function testTeamAlleyOccupancy(): void {
 
 function testLaneToggleAllSpawners(): void {
   const state = createInitialState([
-    { race: Race.Surge, isBot: false },
-    { race: Race.Tide, isBot: true },
-    { race: Race.Ember, isBot: true },
-    { race: Race.Bastion, isBot: true },
+    { race: Race.Crown, isBot: false },
+    { race: Race.Horde, isBot: true },
+    { race: Race.Demon, isBot: true },
+    { race: Race.Deep, isBot: true },
   ]);
   state.players[0].gold = 1000;
   state.players[0].wood = 100;
@@ -80,10 +80,10 @@ function testLaneToggleAllSpawners(): void {
 
 function testSellCooldown(): void {
   const state = createInitialState([
-    { race: Race.Surge, isBot: false },
-    { race: Race.Tide, isBot: true },
-    { race: Race.Ember, isBot: true },
-    { race: Race.Bastion, isBot: true },
+    { race: Race.Crown, isBot: false },
+    { race: Race.Horde, isBot: true },
+    { race: Race.Demon, isBot: true },
+    { race: Race.Deep, isBot: true },
   ]);
   state.players[0].gold = 1000;
   state.players[0].stone = 100;
@@ -108,10 +108,10 @@ function testSellCooldown(): void {
 
 function testPurchaseUpgradeAffectsFutureSpawns(): void {
   const state = createInitialState([
-    { race: Race.Surge, isBot: false },
-    { race: Race.Tide, isBot: true },
-    { race: Race.Ember, isBot: true },
-    { race: Race.Bastion, isBot: true },
+    { race: Race.Crown, isBot: false },
+    { race: Race.Horde, isBot: true },
+    { race: Race.Demon, isBot: true },
+    { race: Race.Deep, isBot: true },
   ]);
 
   state.players[0].gold = 1000;
@@ -136,7 +136,7 @@ function testPurchaseUpgradeAffectsFutureSpawns(): void {
 
   const spawned = state.units.find(u => u.playerId === 0 && u.category === 'melee');
   assert(spawned, 'expected at least one spawned melee unit after upgrades');
-  const base = UNIT_STATS[Race.Surge][BuildingType.MeleeSpawner];
+  const base = UNIT_STATS[Race.Crown][BuildingType.MeleeSpawner];
   assert(!!base, 'missing base unit stat for upgrade test');
   assert(spawned.hp > base.hp, 'upgraded spawn should have higher HP than base');
   assert(spawned.damage > base.damage, 'upgraded spawn should have higher damage than base');
@@ -144,10 +144,10 @@ function testPurchaseUpgradeAffectsFutureSpawns(): void {
 
 function testPingLifecycle(): void {
   const state = createInitialState([
-    { race: Race.Surge, isBot: false },
-    { race: Race.Tide, isBot: true },
-    { race: Race.Ember, isBot: true },
-    { race: Race.Bastion, isBot: true },
+    { race: Race.Crown, isBot: false },
+    { race: Race.Horde, isBot: true },
+    { race: Race.Demon, isBot: true },
+    { race: Race.Deep, isBot: true },
   ]);
 
   runTick(state, [{ type: 'ping', playerId: 0, x: 20, y: 30 }]);
@@ -161,10 +161,10 @@ function testPingLifecycle(): void {
 
 function testQuickChatLifecycle(): void {
   const state = createInitialState([
-    { race: Race.Surge, isBot: false },
-    { race: Race.Tide, isBot: true },
-    { race: Race.Ember, isBot: true },
-    { race: Race.Bastion, isBot: true },
+    { race: Race.Crown, isBot: false },
+    { race: Race.Horde, isBot: true },
+    { race: Race.Demon, isBot: true },
+    { race: Race.Deep, isBot: true },
   ]);
 
   runTick(state, [{ type: 'quick_chat', playerId: 0, message: 'Attack Left' }]);

@@ -154,12 +154,15 @@ export enum Team {
 }
 
 export enum Race {
-  Surge = 'surge',
-  Tide = 'tide',
-  Ember = 'ember',
-  Bastion = 'bastion',
-  Shade = 'shade',
-  Thorn = 'thorn',
+  Crown = 'crown',
+  Horde = 'horde',
+  Goblins = 'goblins',
+  Oozlings = 'oozlings',
+  Demon = 'demon',
+  Deep = 'deep',
+  Wild = 'wild',
+  Geists = 'geists',
+  Tenders = 'tenders',
 }
 
 export enum Lane {

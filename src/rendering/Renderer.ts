@@ -1,4 +1,6 @@
 import { Camera } from './Camera';
+import { SpriteLoader, drawSpriteFrame, drawGridFrame, type SpriteDef, type GridSpriteDef } from './SpriteLoader';
+import { UIAssets } from './UIAssets';
 import {
   GameState, Team, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE,
   DIAMOND_CENTER_X, DIAMOND_CENTER_Y,
@@ -8,6 +10,7 @@ import {
   getMarginAtRow,
   BuildingType, Lane, LANE_PATHS, Vec2,
   StatusType, Race,
+  type BuildingState, type UnitState, type HarvesterState, type ProjectileState,
 } from '../simulation/types';
 import { getHQPosition, getBuildGridOrigin, getHutGridOrigin, getTeamAlleyOrigin, getUnitUpgradeMultipliers } from '../simulation/GameState';
 import { RACE_COLORS, TOWER_STATS, PLAYER_COLORS } from '../simulation/data';
@@ -31,15 +34,29 @@ function quickChatStyle(message: string): { icon: string; color: string } {
   return { icon: '!', color: '#ffcc80' };
 }
 
+// Seeded random for deterministic decoration placement
+function seededRand(seed: number): () => number {
+  let s = seed;
+  return () => { s = (s * 16807 + 0) % 2147483647; return s / 2147483647; };
+}
+
 export class Renderer {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   camera: Camera;
+  sprites: SpriteLoader;
+  ui: UIAssets;
+  private terrainCache: HTMLCanvasElement | null = null;
+  private waterCache: HTMLCanvasElement | null = null;
+  private terrainReady = false;
+  private waterEdges: { x: number; y: number; dirs: number }[] = [];
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, ui?: UIAssets) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.camera = new Camera(canvas);
+    this.sprites = new SpriteLoader();
+    this.ui = ui ?? new UIAssets();
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -52,23 +69,19 @@ export class Renderer {
   render(state: GameState): void {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#0a0a0a';
+    ctx.fillStyle = '#4a8a7b';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     this.camera.applyTransform(ctx);
 
-    this.drawZones(ctx);
+    this.drawZones(ctx, state.tick);
     this.drawLanePaths(ctx);
     this.drawDiamondCells(ctx, state);
     this.drawResourceNodes(ctx);
     this.drawBuildGrids(ctx, state);
     this.drawHutZones(ctx, state);
     this.drawTowerAlleys(ctx, state);
-    this.drawHQs(ctx, state);
-    this.drawBuildings(ctx, state);
-    this.drawProjectiles(ctx, state);
-    this.drawUnits(ctx, state);
-    this.drawHarvesters(ctx, state);
+    this.drawYSorted(ctx, state);
     this.drawDiamondObjective(ctx, state);
     this.drawNukeTelegraphs(ctx, state);
     this.drawPings(ctx, state);
@@ -82,59 +95,342 @@ export class Renderer {
     this.drawMinimap(ctx, state);
   }
 
-  // === Map Shape ===
+  // === Terrain (Pre-rendered) ===
 
-  private drawZones(ctx: CanvasRenderingContext2D): void {
-    ctx.fillStyle = '#050505';
-    ctx.fillRect(0, 0, MAP_WIDTH * T, MAP_HEIGHT * T);
+  private buildTerrainCache(): void {
+    const tilemapData = this.sprites.getTerrainSprite('tilemap');
+    if (!tilemapData) return; // tilemap not loaded yet
 
-    const leftEdge: { x: number; y: number }[] = [];
-    const rightEdge: { x: number; y: number }[] = [];
-    for (let y = 0; y <= MAP_HEIGHT; y++) {
-      const m = getMarginAtRow(y);
-      leftEdge.push({ x: m, y });
-      rightEdge.push({ x: MAP_WIDTH - m, y });
+    const [tilemap] = tilemapData;
+
+    // Helper: is tile at (tx,ty) land (within the peanut)?
+    const isLand = (tx: number, ty: number): boolean => {
+      if (ty < 0 || ty >= MAP_HEIGHT || tx < 0 || tx >= MAP_WIDTH) return false;
+      const m = getMarginAtRow(ty);
+      return tx >= Math.ceil(m) && tx < Math.floor(MAP_WIDTH - m);
+    };
+
+    // ---- Build static water cache (water bg + rocks + clouds) ----
+    const wc = document.createElement('canvas');
+    wc.width = MAP_WIDTH * T;
+    wc.height = MAP_HEIGHT * T;
+    const wctx = wc.getContext('2d')!;
+
+    const waterBgData = this.sprites.getTerrainSprite('waterBg');
+    if (waterBgData) {
+      const [waterImg] = waterBgData;
+      for (let y = 0; y < wc.height; y += T) {
+        for (let x = 0; x < wc.width; x += T) {
+          wctx.drawImage(waterImg, x, y, T, T);
+        }
+      }
+    } else {
+      wctx.fillStyle = '#5b9a8b';
+      wctx.fillRect(0, 0, wc.width, wc.height);
     }
 
-    this.fillZoneRows(ctx, leftEdge, rightEdge, ZONES.TOP_BASE.start, ZONES.TOP_BASE.end, 'rgba(200, 0, 0, 0.08)');
-    this.fillZoneRows(ctx, leftEdge, rightEdge, ZONES.BOTTOM_BASE.start, ZONES.BOTTOM_BASE.end, 'rgba(0, 80, 200, 0.08)');
-    this.fillZoneRows(ctx, leftEdge, rightEdge, ZONES.TOP_TERRITORY.start, ZONES.TOP_TERRITORY.end, 'rgba(0, 100, 50, 0.04)');
-    this.fillZoneRows(ctx, leftEdge, rightEdge, ZONES.BOTTOM_TERRITORY.start, ZONES.BOTTOM_TERRITORY.end, 'rgba(0, 100, 50, 0.04)');
-    this.fillZoneRows(ctx, leftEdge, rightEdge, ZONES.MID.start, ZONES.MID.end, 'rgba(80, 50, 0, 0.04)');
+    const rand = seededRand(42);
+    const waterRock1Data = this.sprites.getTerrainSprite('waterRock1');
+    const waterRock2Data = this.sprites.getTerrainSprite('waterRock2');
+    if (waterRock1Data || waterRock2Data) {
+      for (let i = 0; i < 20; i++) {
+        const y = Math.floor(rand() * MAP_HEIGHT);
+        const m = getMarginAtRow(y);
+        const side = rand() < 0.5 ? 'left' : 'right';
+        let x: number;
+        if (side === 'left') {
+          if (m < 2) { rand(); continue; }
+          x = Math.floor(rand() * (Math.ceil(m) - 1));
+        } else {
+          const right = Math.floor(MAP_WIDTH - m);
+          if (right >= MAP_WIDTH - 1) { rand(); continue; }
+          x = right + 1 + Math.floor(rand() * (MAP_WIDTH - right - 1));
+        }
+        const rockData = (i % 2 === 0 && waterRock1Data) ? waterRock1Data : (waterRock2Data ?? waterRock1Data);
+        if (!rockData) continue;
+        const [rImg, rDef] = rockData;
+        const frame = Math.floor(rand() * rDef.cols);
+        const s = T * (1.5 + rand() * 1.0);
+        const aspect = rDef.frameW / rDef.frameH;
+        drawSpriteFrame(wctx, rImg, rDef, frame, x * T - s / 2, y * T - s * 0.5, s * aspect, s);
+      }
+    }
 
-    ctx.strokeStyle = '#222';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(leftEdge[0].x * T, leftEdge[0].y * T);
-    for (let i = 1; i < leftEdge.length; i++) {
-      ctx.lineTo(leftEdge[i].x * T, leftEdge[i].y * T);
+    const cloud1Data = this.sprites.getTerrainSprite('cloud1');
+    const cloud2Data = this.sprites.getTerrainSprite('cloud2');
+    const cloud3Data = this.sprites.getTerrainSprite('cloud3');
+    const clouds = [cloud1Data, cloud2Data, cloud3Data].filter(Boolean) as [HTMLImageElement, SpriteDef][];
+    if (clouds.length > 0) {
+      for (let i = 0; i < 12; i++) {
+        const y = Math.floor(rand() * MAP_HEIGHT);
+        const m = getMarginAtRow(y);
+        const side = rand() < 0.5 ? 'left' : 'right';
+        let x: number;
+        if (side === 'left') {
+          if (m < 3) { rand(); continue; }
+          x = Math.floor(rand() * Math.ceil(m));
+        } else {
+          const right = Math.floor(MAP_WIDTH - m);
+          if (right >= MAP_WIDTH - 2) { rand(); continue; }
+          x = right + Math.floor(rand() * (MAP_WIDTH - right));
+        }
+        const [cImg, cDef] = clouds[Math.floor(rand() * clouds.length)];
+        const cw = T * (4 + rand() * 3);
+        const ch = cw * (cDef.frameH / cDef.frameW);
+        wctx.globalAlpha = 0.5 + rand() * 0.3;
+        wctx.drawImage(cImg, x * T - cw / 2, y * T - ch / 2, cw, ch);
+      }
+      wctx.globalAlpha = 1;
     }
-    ctx.lineTo(rightEdge[rightEdge.length - 1].x * T, rightEdge[rightEdge.length - 1].y * T);
-    for (let i = rightEdge.length - 2; i >= 0; i--) {
-      ctx.lineTo(rightEdge[i].x * T, rightEdge[i].y * T);
+    this.waterCache = wc;
+
+    // ---- Build land terrain cache (cliff faces + grass + decorations) ----
+    const tc = document.createElement('canvas');
+    tc.width = MAP_WIDTH * T;
+    tc.height = MAP_HEIGHT * T;
+    const tctx = tc.getContext('2d')!;
+
+    // Tilemap source tile size
+    const S = 64;
+
+    // Pre-compute and store water edge tiles for per-frame foam animation
+    this.waterEdges = [];
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+      for (let x = 0; x < MAP_WIDTH; x++) {
+        if (isLand(x, y)) continue;
+        const n = isLand(x, y - 1) ? 1 : 0;
+        const s = isLand(x, y + 1) ? 2 : 0;
+        const w = isLand(x - 1, y) ? 4 : 0;
+        const e = isLand(x + 1, y) ? 8 : 0;
+        const dirs = n | s | w | e;
+        if (dirs) this.waterEdges.push({ x, y, dirs });
+      }
     }
-    ctx.closePath();
-    ctx.stroke();
+
+    // 1. Cliff faces (programmatic stone gradient below grass edges)
+    for (const edge of this.waterEdges) {
+      if (!(edge.dirs & 1)) continue; // only south-facing cliffs (land to north)
+      const px = edge.x * T;
+      const py = edge.y * T;
+      // Stone cliff face gradient
+      const grad = tctx.createLinearGradient(px, py, px, py + T);
+      grad.addColorStop(0, '#6b8a7a');
+      grad.addColorStop(0.3, '#5a7868');
+      grad.addColorStop(1, '#4a6858');
+      tctx.fillStyle = grad;
+      tctx.fillRect(px, py, T, T);
+      // Vertical stone line detail
+      tctx.fillStyle = 'rgba(0,0,0,0.12)';
+      for (let lx = 3; lx < T; lx += 5) {
+        tctx.fillRect(px + lx, py, 1, T);
+      }
+    }
+    // Second row of cliff (extends depth)
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+      for (let x = 0; x < MAP_WIDTH; x++) {
+        if (isLand(x, y)) continue;
+        if (isLand(x, y - 1)) continue; // skip first row (already drawn above)
+        if (!isLand(x, y - 2)) continue; // need land 2 rows up
+        const px = x * T;
+        const py = y * T;
+        const grad = tctx.createLinearGradient(px, py, px, py + T);
+        grad.addColorStop(0, '#4a6858');
+        grad.addColorStop(1, '#3a5848');
+        tctx.fillStyle = grad;
+        tctx.fillRect(px, py, T, T);
+        tctx.fillStyle = 'rgba(0,0,0,0.08)';
+        for (let lx = 3; lx < T; lx += 5) {
+          tctx.fillRect(px + lx, py, 1, T);
+        }
+      }
+    }
+
+    // 2. Autotiled grass with proper edge tiles (9-patch from tilemap)
+    const OV = 3; // pixel overhang for edge tiles
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+      for (let x = 0; x < MAP_WIDTH; x++) {
+        if (!isLand(x, y)) continue;
+
+        const n = isLand(x, y - 1);
+        const s = isLand(x, y + 1);
+        const e = isLand(x + 1, y);
+        const w = isLand(x - 1, y);
+
+        let gsx: number, gsy: number;
+        let edge = true;
+
+        if      (!n && !w) { gsx = 0;     gsy = 0; }      // TL corner
+        else if (!n && !e) { gsx = 2 * S; gsy = 0; }      // TR corner
+        else if (!s && !w) { gsx = 0;     gsy = 2 * S; }  // BL corner
+        else if (!s && !e) { gsx = 2 * S; gsy = 2 * S; }  // BR corner
+        else if (!n)       { gsx = S;     gsy = 0; }      // top edge
+        else if (!s)       { gsx = S;     gsy = 2 * S; }  // bottom edge
+        else if (!w)       { gsx = 0;     gsy = S; }      // left edge
+        else if (!e)       { gsx = 2 * S; gsy = S; }      // right edge
+        else               { gsx = S;     gsy = S; edge = false; } // center
+
+        if (edge) {
+          tctx.drawImage(tilemap, gsx, gsy, S, S,
+            x * T - OV, y * T - OV, T + OV * 2, T + OV * 2);
+        } else {
+          tctx.drawImage(tilemap, gsx, gsy, S, S, x * T, y * T, T, T);
+        }
+      }
+    }
+
+    // 3. Subtle zone tinting over grass
+    const drawZoneTint = (startRow: number, endRow: number, color: string) => {
+      tctx.fillStyle = color;
+      for (let y = startRow; y < endRow; y++) {
+        const m = getMarginAtRow(y);
+        const left = Math.ceil(m);
+        const right = Math.floor(MAP_WIDTH - m);
+        tctx.fillRect(left * T, y * T, (right - left) * T, T);
+      }
+    };
+    drawZoneTint(ZONES.TOP_BASE.start, ZONES.TOP_BASE.end, 'rgba(200, 0, 0, 0.06)');
+    drawZoneTint(ZONES.BOTTOM_BASE.start, ZONES.BOTTOM_BASE.end, 'rgba(0, 80, 200, 0.06)');
+
+    // 4. Scatter bush decorations on grass
+    const bush1Data = this.sprites.getTerrainSprite('bush1');
+    const bush2Data = this.sprites.getTerrainSprite('bush2');
+    if (bush1Data || bush2Data) {
+      for (let i = 0; i < 40; i++) {
+        const y = Math.floor(rand() * MAP_HEIGHT);
+        const m = getMarginAtRow(y);
+        const left = Math.ceil(m) + 2;
+        const right = Math.floor(MAP_WIDTH - m) - 2;
+        if (left >= right) continue;
+        const x = left + Math.floor(rand() * (right - left));
+        const bushData = (i % 2 === 0 && bush1Data) ? bush1Data : (bush2Data ?? bush1Data);
+        if (!bushData) continue;
+        const [bImg, bDef] = bushData;
+        const frame = Math.floor(rand() * bDef.cols);
+        const s = T * (1.0 + rand() * 0.6);
+        const aspect = bDef.frameW / bDef.frameH;
+        tctx.globalAlpha = 0.7 + rand() * 0.3;
+        drawSpriteFrame(tctx, bImg, bDef, frame, x * T - s / 2, y * T - s * 0.5, s * aspect, s);
+      }
+      tctx.globalAlpha = 1;
+    }
+
+    this.terrainCache = tc;
+    this.terrainReady = true;
   }
 
-  private fillZoneRows(
-    ctx: CanvasRenderingContext2D,
-    leftEdge: { x: number; y: number }[],
-    rightEdge: { x: number; y: number }[],
-    startRow: number, endRow: number, color: string
-  ): void {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(leftEdge[startRow].x * T, leftEdge[startRow].y * T);
-    for (let y = startRow + 1; y <= endRow; y++) {
-      ctx.lineTo(leftEdge[y].x * T, leftEdge[y].y * T);
+  private drawWaterAnimation(ctx: CanvasRenderingContext2D, tick: number): void {
+    // Visible tile range (camera-based culling)
+    const cam = this.camera;
+    const invZoom = 1 / cam.zoom;
+    const sx = Math.max(0, Math.floor(cam.x / T) - 1);
+    const sy = Math.max(0, Math.floor(cam.y / T) - 1);
+    const ex = Math.min(MAP_WIDTH, Math.ceil((cam.x + ctx.canvas.width * invZoom) / T) + 1);
+    const ey = Math.min(MAP_HEIGHT, Math.ceil((cam.y + ctx.canvas.height * invZoom) / T) + 1);
+
+    // 1. Broad water wave bands (covers all visible water, cheap)
+    const waveCount = 6;
+    for (let i = 0; i < waveCount; i++) {
+      // Each wave band sweeps across the map diagonally
+      const phase = tick * 0.03 + i * (Math.PI * 2 / waveCount);
+      const bandY = ((Math.sin(phase) * 0.5 + 0.5) * MAP_HEIGHT * T);
+      const bandH = T * 3;
+      const alpha = 0.025 + Math.sin(tick * 0.05 + i) * 0.015;
+      if (alpha <= 0) continue;
+      ctx.fillStyle = `rgba(180,240,255,${alpha.toFixed(3)})`;
+      ctx.fillRect(0, bandY - bandH / 2, MAP_WIDTH * T, bandH);
     }
-    ctx.lineTo(rightEdge[endRow].x * T, rightEdge[endRow].y * T);
-    for (let y = endRow - 1; y >= startRow; y--) {
-      ctx.lineTo(rightEdge[y].x * T, rightEdge[y].y * T);
+
+    // 2. Per-tile shimmer on water edge tiles
+    for (const edge of this.waterEdges) {
+      if (edge.x < sx || edge.x >= ex || edge.y < sy || edge.y >= ey) continue;
+      const wave1 = Math.sin(tick * 0.07 + edge.x * 0.8 + edge.y * 0.5);
+      const wave2 = Math.sin(tick * 0.04 - edge.x * 0.3 + edge.y * 0.9);
+      const shimmer = wave1 * 0.04 + wave2 * 0.03;
+      if (shimmer > 0) {
+        ctx.fillStyle = `rgba(180,235,245,${shimmer.toFixed(3)})`;
+      } else {
+        ctx.fillStyle = `rgba(0,30,50,${(-shimmer).toFixed(3)})`;
+      }
+      ctx.fillRect(edge.x * T, edge.y * T, T, T);
     }
-    ctx.closePath();
-    ctx.fill();
+
+    // 2. Foam at land-water edges
+    const foamData = this.sprites.getTerrainSprite('waterFoam');
+    if (foamData) {
+      const [foamImg, foamDef] = foamData;
+      const totalFrames = foamDef.cols;
+      const fw = foamDef.frameW;
+      const fh = foamDef.frameH;
+
+      ctx.globalAlpha = 0.45;
+      for (const edge of this.waterEdges) {
+        if (edge.x < sx || edge.x >= ex || edge.y < sy || edge.y >= ey) continue;
+        // Stagger foam animation per tile for organic look
+        const frame = Math.floor((tick * 0.12 + edge.x * 3.7 + edge.y * 2.3) % totalFrames);
+        const srcX = frame * fw;
+
+        // Draw directional foam strips (only on sides facing land)
+        const px = edge.x * T;
+        const py = edge.y * T;
+        const stripDepth = Math.ceil(T * 0.4);
+
+        if (edge.dirs & 1) { // land to north — foam on top edge
+          ctx.drawImage(foamImg, srcX, 0, fw, fh * 0.3, px - 2, py - 1, T + 4, stripDepth);
+        }
+        if (edge.dirs & 2) { // land to south — foam on bottom edge
+          ctx.drawImage(foamImg, srcX, fh * 0.7, fw, fh * 0.3,
+            px - 2, py + T - stripDepth + 1, T + 4, stripDepth);
+        }
+        if (edge.dirs & 4) { // land to west — foam on left edge
+          ctx.drawImage(foamImg, srcX, 0, fw * 0.3, fh, px - 1, py - 2, stripDepth, T + 4);
+        }
+        if (edge.dirs & 8) { // land to east — foam on right edge
+          ctx.drawImage(foamImg, srcX + fw * 0.7, 0, fw * 0.3, fh,
+            px + T - stripDepth + 1, py - 2, stripDepth, T + 4);
+        }
+      }
+      ctx.globalAlpha = 1;
+    } else {
+      // Programmatic foam fallback (white lines at edges)
+      for (const edge of this.waterEdges) {
+        if (edge.x < sx || edge.x >= ex || edge.y < sy || edge.y >= ey) continue;
+        const px = edge.x * T;
+        const py = edge.y * T;
+        const foamAlpha = 0.12 + Math.sin(tick * 0.1 + edge.x * 1.5 + edge.y * 0.8) * 0.08;
+        ctx.fillStyle = `rgba(200,240,250,${foamAlpha.toFixed(3)})`;
+        if (edge.dirs & 1) ctx.fillRect(px, py, T, 3);
+        if (edge.dirs & 2) ctx.fillRect(px, py + T - 3, T, 3);
+        if (edge.dirs & 4) ctx.fillRect(px, py, 3, T);
+        if (edge.dirs & 8) ctx.fillRect(px + T - 3, py, 3, T);
+      }
+    }
+  }
+
+  private drawZones(ctx: CanvasRenderingContext2D, tick: number): void {
+    // Try to build terrain cache if not ready
+    if (!this.terrainReady) {
+      this.buildTerrainCache();
+    }
+
+    if (this.waterCache && this.terrainCache) {
+      // Draw water background (static cache)
+      ctx.drawImage(this.waterCache, 0, 0);
+      // Draw animated water effects (shimmer + foam)
+      this.drawWaterAnimation(ctx, tick);
+      // Draw land terrain on top (grass + cliff + decorations, transparent water areas)
+      ctx.drawImage(this.terrainCache, 0, 0);
+    } else {
+      // Fallback: simple water + grass colors
+      ctx.fillStyle = '#5b9a8b';
+      ctx.fillRect(0, 0, MAP_WIDTH * T, MAP_HEIGHT * T);
+      ctx.fillStyle = '#3a6b3a';
+      for (let y = 0; y < MAP_HEIGHT; y++) {
+        const m = getMarginAtRow(y);
+        const left = Math.ceil(m);
+        const right = Math.floor(MAP_WIDTH - m);
+        ctx.fillRect(left * T, y * T, (right - left) * T, T);
+      }
+    }
   }
 
   // === Lane Paths ===
@@ -153,13 +449,13 @@ export class Renderer {
         }
       }
       ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      ctx.globalAlpha = 0.2;
+      ctx.lineWidth = 5;
+      ctx.globalAlpha = 0.45;
       ctx.stroke();
 
       ctx.setLineDash([8, 12]);
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.6;
       ctx.beginPath();
       ctx.moveTo(points[0].x * T, points[0].y * T);
       for (let i = 1; i < points.length; i++) {
@@ -177,8 +473,8 @@ export class Renderer {
     drawPath(LANE_PATHS.bottom.left, LANE_LEFT_COLOR);
     drawPath(LANE_PATHS.bottom.right, LANE_RIGHT_COLOR);
 
-    ctx.font = 'bold 12px monospace';
-    ctx.globalAlpha = 0.4;
+    ctx.font = 'bold 14px monospace';
+    ctx.globalAlpha = 0.7;
     ctx.textAlign = 'center';
     ctx.fillStyle = LANE_LEFT_COLOR;
     ctx.fillText('L', 20 * T, DIAMOND_CENTER_Y * T);
@@ -191,26 +487,32 @@ export class Renderer {
   // === Diamond Gold Cells ===
 
   private drawDiamondCells(ctx: CanvasRenderingContext2D, state: GameState): void {
+    const goldStoneData = this.sprites.getResourceSprite('goldStone');
+
     for (const cell of state.diamondCells) {
       const px = cell.tileX * T;
       const py = cell.tileY * T;
 
       if (cell.gold > 0) {
-        const pct = cell.gold / cell.maxGold;
-        const brightness = 0.3 + pct * 0.7;
-        const r = Math.round(200 * brightness);
-        const g = Math.round(170 * brightness);
-        const b = Math.round(20 * brightness);
-        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-        ctx.fillRect(px, py, T, T);
-
-        ctx.strokeStyle = `rgba(255, 215, 0, ${0.2 + pct * 0.3})`;
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(px, py, T, T);
-
-        if (pct > 0.8 && (cell.tileX + cell.tileY) % 3 === 0) {
-          ctx.fillStyle = 'rgba(255, 255, 200, 0.4)';
-          ctx.fillRect(px + T / 2 - 1, py + T / 2 - 1, 2, 2);
+        if (goldStoneData) {
+          const [img, def] = goldStoneData;
+          const pct = cell.gold / cell.maxGold;
+          ctx.globalAlpha = 0.4 + pct * 0.6;
+          const stoneSize = T * 3;
+          const offset = (stoneSize - T) / 2;
+          drawSpriteFrame(ctx, img, def, 0, px - offset, py - offset, stoneSize, stoneSize);
+          ctx.globalAlpha = 1;
+        } else {
+          const pct = cell.gold / cell.maxGold;
+          const brightness = 0.3 + pct * 0.7;
+          const r = Math.round(200 * brightness);
+          const g = Math.round(170 * brightness);
+          const b = Math.round(20 * brightness);
+          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+          ctx.fillRect(px, py, T, T);
+          ctx.strokeStyle = `rgba(255, 215, 0, ${0.2 + pct * 0.3})`;
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(px, py, T, T);
         }
       } else {
         ctx.fillStyle = 'rgba(15, 12, 8, 0.6)';
@@ -235,15 +537,12 @@ export class Renderer {
   // === Resource Nodes ===
 
   private drawResourceNodes(ctx: CanvasRenderingContext2D): void {
-    const drawNode = (x: number, y: number, label: string, color: string) => {
+    const drawNodeFallback = (x: number, y: number, label: string, color: string) => {
       const px = x * T, py = y * T;
       ctx.beginPath();
       ctx.arc(px, py, T * 1.2, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
-      ctx.strokeStyle = color.replace('0.2', '0.5');
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
       ctx.fillStyle = '#bbb';
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
@@ -251,13 +550,79 @@ export class Renderer {
       ctx.textAlign = 'start';
     };
 
-    drawNode(WOOD_NODE_X, DIAMOND_CENTER_Y, 'WOOD', 'rgba(76, 175, 80, 0.2)');
-    drawNode(STONE_NODE_X, DIAMOND_CENTER_Y, 'STONE', 'rgba(158, 158, 158, 0.2)');
+    // Wood node — forest cluster of multiple trees
+    const tree1Data = this.sprites.getResourceSprite('tree');
+    const tree2Data = this.sprites.getResourceSprite('tree2');
+    const tree3Data = this.sprites.getResourceSprite('tree3');
+    if (tree1Data) {
+      const cx = WOOD_NODE_X * T, cy = DIAMOND_CENTER_Y * T;
+      const now = Date.now() / 1000;
+      const drawTree = (data: [HTMLImageElement, { frameW: number; frameH: number; cols: number; url: string }], x: number, y: number, size: number, phase: number) => {
+        const [img, def] = data;
+        // Gentle procedural sway: rotate around trunk base
+        const angle = Math.sin(now * 1.2 + phase) * 0.03;
+        ctx.save();
+        ctx.translate(x, y);        // trunk base position
+        ctx.rotate(angle);
+        drawSpriteFrame(ctx, img, def, 0, -size / 2, -size * 0.8, size, size);
+        ctx.restore();
+      };
+      // Back row (smaller, behind)
+      const s1 = T * 2;
+      if (tree2Data) drawTree(tree2Data, cx - T * 2, cy - T * 0.5, s1, 0);
+      if (tree3Data) drawTree(tree3Data, cx + T * 2.5, cy - T * 0.5, s1, 2.1);
+      // Front row (larger, in front)
+      const s2 = T * 3;
+      drawTree(tree1Data, cx, cy, s2, 0.7);
+      if (tree2Data) drawTree(tree2Data, cx - T * 3, cy + T, s2 * 0.8, 1.4);
+      if (tree3Data) drawTree(tree3Data, cx + T * 3, cy + T, s2 * 0.8, 3.5);
+    } else {
+      drawNodeFallback(WOOD_NODE_X, DIAMOND_CENTER_Y, 'WOOD', 'rgba(76, 175, 80, 0.2)');
+    }
 
+    // Stone node — herd of sheep
+    const sheepData = this.sprites.getResourceSprite('sheep');
+    const sheepGrassData = this.sprites.getResourceSprite('sheepGrass');
+    if (sheepData) {
+      const cx = STONE_NODE_X * T, cy = DIAMOND_CENTER_Y * T;
+      const drawSize = T * 1.8;
+      const tick = Math.floor(Date.now() / 200);
+      const [img, def] = sheepData;
+      // Draw 4-5 sheep in a cluster, each with slightly offset animation
+      const positions = [
+        { x: cx - T * 2, y: cy - T * 1.2 },
+        { x: cx + T * 1.5, y: cy - T * 1 },
+        { x: cx - T * 0.5, y: cy + T * 0.3 },
+        { x: cx + T * 2.5, y: cy + T * 0.5 },
+        { x: cx - T * 2.5, y: cy + T * 0.8 },
+      ];
+      for (let i = 0; i < positions.length; i++) {
+        const p = positions[i];
+        // Alternate between idle and grazing animations
+        const useGrass = sheepGrassData && (i % 2 === 1);
+        const [sImg, sDef] = useGrass ? sheepGrassData! : [img, def];
+        const frame = (tick + i * 2) % sDef.cols;
+        drawSpriteFrame(ctx, sImg, sDef, frame, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
+      }
+    } else {
+      drawNodeFallback(STONE_NODE_X, DIAMOND_CENTER_Y, 'STONE', 'rgba(158, 158, 158, 0.2)');
+    }
+
+    // Gold nodes near HQs — bigger gold resource sprite
+    const goldData = this.sprites.getResourceSprite('goldResource');
     const bHQ = getHQPosition(Team.Bottom);
     const tHQ = getHQPosition(Team.Top);
-    drawNode(bHQ.x + HQ_WIDTH / 2, bHQ.y - 6, 'GOLD', 'rgba(255, 215, 0, 0.2)');
-    drawNode(tHQ.x + HQ_WIDTH / 2, tHQ.y + HQ_HEIGHT + 6, 'GOLD', 'rgba(255, 215, 0, 0.2)');
+    if (goldData) {
+      const [img, def] = goldData;
+      const drawSize = T * 5;
+      const bx = (bHQ.x + HQ_WIDTH / 2) * T, by = (bHQ.y - 6) * T;
+      const tx = (tHQ.x + HQ_WIDTH / 2) * T, ty = (tHQ.y + HQ_HEIGHT + 6) * T;
+      drawSpriteFrame(ctx, img, def, 0, bx - drawSize / 2, by - drawSize / 2, drawSize, drawSize);
+      drawSpriteFrame(ctx, img, def, 0, tx - drawSize / 2, ty - drawSize / 2, drawSize, drawSize);
+    } else {
+      drawNodeFallback(bHQ.x + HQ_WIDTH / 2, bHQ.y - 6, 'GOLD', 'rgba(255, 215, 0, 0.2)');
+      drawNodeFallback(tHQ.x + HQ_WIDTH / 2, tHQ.y + HQ_HEIGHT + 6, 'GOLD', 'rgba(255, 215, 0, 0.2)');
+    }
   }
 
   // === Build Grids ===
@@ -271,10 +636,10 @@ export class Renderer {
       const pc = PLAYER_COLORS[p];
       const tc = hexToRgba(pc);
 
-      ctx.fillStyle = tc + '0.08)';
+      ctx.fillStyle = tc + '0.18)';
       ctx.fillRect(origin.x * T, origin.y * T, BUILD_GRID_COLS * T, BUILD_GRID_ROWS * T);
 
-      ctx.strokeStyle = tc + '0.2)';
+      ctx.strokeStyle = tc + '0.35)';
       ctx.lineWidth = 0.5;
       for (let gx = 0; gx <= BUILD_GRID_COLS; gx++) {
         ctx.beginPath();
@@ -289,11 +654,11 @@ export class Renderer {
         ctx.stroke();
       }
 
-      ctx.strokeStyle = tc + '0.35)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = tc + '0.6)';
+      ctx.lineWidth = 2;
       ctx.strokeRect(origin.x * T, origin.y * T, BUILD_GRID_COLS * T, BUILD_GRID_ROWS * T);
 
-      ctx.fillStyle = tc + '0.7)';
+      ctx.fillStyle = tc + '0.85)';
       ctx.font = 'bold 11px monospace';
       const ly = p < 2 ? (origin.y + BUILD_GRID_ROWS + 1.2) * T : (origin.y - 0.5) * T;
       ctx.fillText(`P${p + 1} [${player.race}]`, origin.x * T, ly);
@@ -310,9 +675,9 @@ export class Renderer {
       const pc = PLAYER_COLORS[p];
       const tc = hexToRgba(pc);
 
-      ctx.fillStyle = tc + '0.06)';
+      ctx.fillStyle = tc + '0.15)';
       ctx.fillRect(origin.x * T, origin.y * T, HUT_GRID_COLS * T, T);
-      ctx.strokeStyle = tc + '0.3)';
+      ctx.strokeStyle = tc + '0.4)';
       ctx.lineWidth = 1;
       for (let gx = 0; gx <= HUT_GRID_COLS; gx++) {
         ctx.beginPath();
@@ -320,11 +685,11 @@ export class Renderer {
         ctx.lineTo((origin.x + gx) * T, (origin.y + 1) * T);
         ctx.stroke();
       }
-      ctx.strokeStyle = tc + '0.4)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = tc + '0.6)';
+      ctx.lineWidth = 2;
       ctx.strokeRect(origin.x * T, origin.y * T, HUT_GRID_COLS * T, T);
 
-      ctx.fillStyle = tc + '0.5)';
+      ctx.fillStyle = tc + '0.8)';
       ctx.font = 'bold 9px monospace';
       const ly = p < 2 ? (origin.y + 1.8) * T : (origin.y - 0.4) * T;
       ctx.fillText(`P${p + 1} HUTS`, origin.x * T, ly);
@@ -338,10 +703,10 @@ export class Renderer {
       const origin = getTeamAlleyOrigin(team);
       const color = team === Team.Bottom ? '41,121,255' : '255,23,68';
 
-      ctx.fillStyle = `rgba(${color},0.06)`;
+      ctx.fillStyle = `rgba(${color},0.15)`;
       ctx.fillRect(origin.x * T, origin.y * T, SHARED_ALLEY_COLS * T, SHARED_ALLEY_ROWS * T);
 
-      ctx.strokeStyle = `rgba(${color},0.22)`;
+      ctx.strokeStyle = `rgba(${color},0.35)`;
       ctx.lineWidth = 0.5;
       for (let gx = 0; gx <= SHARED_ALLEY_COLS; gx++) {
         ctx.beginPath();
@@ -356,11 +721,11 @@ export class Renderer {
         ctx.stroke();
       }
 
-      ctx.strokeStyle = `rgba(${color},0.45)`;
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = `rgba(${color},0.65)`;
+      ctx.lineWidth = 2;
       ctx.strokeRect(origin.x * T, origin.y * T, SHARED_ALLEY_COLS * T, SHARED_ALLEY_ROWS * T);
 
-      ctx.fillStyle = `rgba(${color},0.55)`;
+      ctx.fillStyle = `rgba(${color},0.8)`;
       ctx.font = 'bold 9px monospace';
       const isBottom = team === Team.Bottom;
       const ly = isBottom ? (origin.y + SHARED_ALLEY_ROWS + 1.2) * T : (origin.y - 0.4) * T;
@@ -368,18 +733,72 @@ export class Renderer {
     }
   }
 
+  // === Y-Sorted Rendering (depth ordering) ===
+
+  private drawYSorted(ctx: CanvasRenderingContext2D, state: GameState): void {
+    // Collect all renderable entities with their sort Y (bottom edge)
+    const items: { y: number; draw: () => void }[] = [];
+
+    // HQs — sort by bottom edge (pos.y + HQ_HEIGHT)
+    for (const team of [Team.Bottom, Team.Top] as Team[]) {
+      const pos = getHQPosition(team);
+      const sortY = (pos.y + HQ_HEIGHT) * T;
+      items.push({ y: sortY, draw: () => this.drawOneHQ(ctx, state, team) });
+    }
+
+    // Buildings — sort by bottom of tile
+    for (const b of state.buildings) {
+      const sortY = (b.worldY + 1) * T;
+      items.push({ y: sortY, draw: () => this.drawOneBuilding(ctx, state, b) });
+    }
+
+    // Projectiles — sort by current position
+    for (const p of state.projectiles) {
+      const sortY = p.y * T;
+      items.push({ y: sortY, draw: () => this.drawOneProjectile(ctx, state, p) });
+    }
+
+    // Units — sort by current y
+    for (const u of state.units) {
+      const sortY = u.y * T;
+      items.push({ y: sortY, draw: () => this.drawOneUnit(ctx, state, u) });
+    }
+
+    // Harvesters — sort by current y
+    for (const h of state.harvesters) {
+      if (h.state === 'dead') continue;
+      const sortY = h.y * T;
+      items.push({ y: sortY, draw: () => this.drawOneHarvester(ctx, state, h) });
+    }
+
+    // Sort by Y ascending (higher on screen drawn first, lower on screen drawn last / in front)
+    items.sort((a, b) => a.y - b.y);
+
+    for (const item of items) {
+      item.draw();
+    }
+  }
+
   // === HQs ===
 
-  private drawHQs(ctx: CanvasRenderingContext2D, state: GameState): void {
-    for (const team of [Team.Bottom, Team.Top]) {
-      const pos = getHQPosition(team);
-      const hp = state.hqHp[team];
-      const color = team === Team.Bottom ? '#2979ff' : '#ff1744';
-      const bg = team === Team.Bottom ? 'rgba(41, 121, 255, 0.15)' : 'rgba(255, 23, 68, 0.15)';
+  private drawOneHQ(ctx: CanvasRenderingContext2D, state: GameState, team: Team): void {
+    const pos = getHQPosition(team);
+    const hp = state.hqHp[team];
+    const color = team === Team.Bottom ? '#2979ff' : '#ff1744';
+    const bg = team === Team.Bottom ? 'rgba(41, 121, 255, 0.15)' : 'rgba(255, 23, 68, 0.15)';
 
-      const px = pos.x * T, py = pos.y * T;
-      const w = HQ_WIDTH * T, h = HQ_HEIGHT * T;
+    const px = pos.x * T, py = pos.y * T;
+    const w = HQ_WIDTH * T, h = HQ_HEIGHT * T;
 
+    const hqPlayerId = team === Team.Bottom ? 0 : 2;
+    const sprite = this.sprites.getHQSprite(hqPlayerId);
+    if (sprite) {
+      const drawW = w + T * 2;
+      const drawH = (drawW / sprite.width) * sprite.height;
+      const drawX = px - T;
+      const drawY = py + h - drawH;
+      ctx.drawImage(sprite, drawX, drawY, drawW, drawH);
+    } else {
       ctx.fillStyle = bg;
       ctx.fillRect(px, py, w, h);
       ctx.strokeStyle = color;
@@ -396,28 +815,30 @@ export class Renderer {
       ctx.font = 'bold 14px monospace';
       ctx.textAlign = 'center';
       ctx.fillText(team === Team.Bottom ? 'B' : 'T', cx, cy + 3);
-
-      const barW = w - 8, barH = 5;
-      const barX = px + 4;
-      const barY = team === Team.Bottom ? py - 10 : py + h + 4;
-      const hpPct = Math.max(0, hp / HQ_HP);
-
-      ctx.fillStyle = '#222';
-      ctx.fillRect(barX, barY, barW, barH);
-      ctx.fillStyle = hpPct > 0.5 ? '#4caf50' : hpPct > 0.25 ? '#ff9800' : '#f44336';
-      ctx.fillRect(barX, barY, barW * hpPct, barH);
-
-      ctx.fillStyle = '#999';
-      ctx.font = '8px monospace';
-      ctx.fillText(`${hp}`, cx, barY + barH + 10);
-      ctx.textAlign = 'start';
     }
+
+    const cx = px + w / 2;
+    const barW = w - 8, barH = 5;
+    const barX = px + 4;
+    const barY = team === Team.Bottom ? py - 10 : py + h + 4;
+    const hpPct = Math.max(0, hp / HQ_HP);
+
+    ctx.fillStyle = '#222';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = hpPct > 0.5 ? '#4caf50' : hpPct > 0.25 ? '#ff9800' : '#f44336';
+    ctx.fillRect(barX, barY, barW * hpPct, barH);
+
+    ctx.fillStyle = '#999';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${hp}`, cx, barY + barH + 10);
+    ctx.textAlign = 'start';
   }
 
   // === Buildings ===
 
-  private drawBuildings(ctx: CanvasRenderingContext2D, state: GameState): void {
-    for (const b of state.buildings) {
+  private drawOneBuilding(ctx: CanvasRenderingContext2D, state: GameState, b: BuildingState): void {
+    {
       const player = state.players[b.playerId];
       const rc = RACE_COLORS[player.race];
       const playerColor = PLAYER_COLORS[b.playerId] || '#888';
@@ -426,37 +847,20 @@ export class Renderer {
       const half = T / 2 - 2;
 
       const upgradeTier = b.upgradePath.length - 1; // 0=base, 1=tier1, 2=tier2
-      ctx.fillStyle = 'rgba(20, 20, 20, 0.9)';
-      ctx.strokeStyle = playerColor;
-      ctx.lineWidth = upgradeTier >= 2 ? 3 : 2;
+      const sprite = this.sprites.getBuildingSprite(b.type, b.playerId);
 
-      switch (b.type) {
-        case BuildingType.MeleeSpawner:
-          ctx.fillRect(px - half, py - half, half * 2, half * 2);
-          ctx.strokeRect(px - half, py - half, half * 2, half * 2);
-          break;
-        case BuildingType.RangedSpawner:
-          ctx.beginPath();
-          ctx.moveTo(px, py - half); ctx.lineTo(px + half, py + half); ctx.lineTo(px - half, py + half);
-          ctx.closePath(); ctx.fill(); ctx.stroke();
-          break;
-        case BuildingType.CasterSpawner:
-          ctx.beginPath();
-          for (let i = 0; i < 5; i++) {
-            const a = (i * 2 * Math.PI / 5) - Math.PI / 2;
-            const sx = px + Math.cos(a) * half, sy = py + Math.sin(a) * half;
-            if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
-          }
-          ctx.closePath(); ctx.fill(); ctx.stroke();
-          break;
-        case BuildingType.Tower: {
-          ctx.beginPath();
-          ctx.moveTo(px, py - half); ctx.lineTo(px + half, py);
-          ctx.lineTo(px, py + half); ctx.lineTo(px - half, py);
-          ctx.closePath(); ctx.fill();
-          ctx.strokeStyle = rc.primary;
-          ctx.stroke();
-          // Tower range indicator (subtle) — reflects upgrades
+      if (sprite) {
+        // Draw sprite scaled to fit one tile, anchored at bottom-center
+        // Sprites are taller than wide, so scale by width to fit tile
+        const drawW = T + 4; // slightly larger than tile for visual presence
+        const drawH = (drawW / sprite.width) * sprite.height;
+        const drawX = px - drawW / 2;
+        const drawY = py + half - drawH + 2; // anchor bottom to tile bottom
+
+        ctx.drawImage(sprite, drawX, drawY, drawW, drawH);
+
+        // Tower range indicator
+        if (b.type === BuildingType.Tower) {
           const towerStats = TOWER_STATS[player.race];
           const towerUpgrade = getUnitUpgradeMultipliers(b.upgradePath, player.race, BuildingType.Tower);
           const towerRangeBonus = towerUpgrade.special.towerRangeBonus ?? 0;
@@ -466,23 +870,87 @@ export class Renderer {
           ctx.strokeStyle = `${rc.primary}33`;
           ctx.lineWidth = 1;
           ctx.stroke();
-          break;
         }
-        case BuildingType.HarvesterHut: {
-          ctx.beginPath(); ctx.arc(px, py, half, 0, Math.PI * 2);
-          ctx.fill(); ctx.strokeStyle = '#ffd700'; ctx.stroke();
-          // Show assignment icon
+
+        // Harvester hut assignment icon overlay
+        if (b.type === BuildingType.HarvesterHut) {
           const harv = state.harvesters.find(h => h.hutId === b.id);
           if (harv) {
-            const icons: Record<string, string> = { base_gold: '★', wood: '♣', stone: '▪', center: '◆' };
-            const colors: Record<string, string> = { base_gold: '#ffd700', wood: '#4caf50', stone: '#9e9e9e', center: '#fff' };
-            ctx.fillStyle = colors[harv.assignment] || '#ffd700';
-            ctx.font = 'bold 9px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText(icons[harv.assignment] || '?', px, py + 3);
-            ctx.textAlign = 'start';
+            const iconSz = Math.max(8, half * 0.9);
+            const iconX = px - iconSz / 2;
+            const iconY2 = py + half + 2;
+            if (harv.assignment === 'center') {
+              const diamondSprite = this.sprites.getResourceSprite('goldResource');
+              const dSz = iconSz * 1.8;
+              const dOff = (dSz - iconSz) / 2;
+              if (diamondSprite) ctx.drawImage(diamondSprite[0], iconX - dOff, iconY2 - dOff, dSz, dSz);
+            } else {
+              const iconMap: Record<string, 'gold' | 'wood' | 'meat'> = { base_gold: 'gold', wood: 'wood', stone: 'meat' };
+              this.ui.drawIcon(ctx, iconMap[harv.assignment] || 'gold', iconX, iconY2, iconSz);
+            }
           }
-          break;
+        }
+      } else {
+        // Fallback: procedural shapes
+        ctx.fillStyle = 'rgba(20, 20, 20, 0.9)';
+        ctx.strokeStyle = playerColor;
+        ctx.lineWidth = upgradeTier >= 2 ? 3 : 2;
+
+        switch (b.type) {
+          case BuildingType.MeleeSpawner:
+            ctx.fillRect(px - half, py - half, half * 2, half * 2);
+            ctx.strokeRect(px - half, py - half, half * 2, half * 2);
+            break;
+          case BuildingType.RangedSpawner:
+            ctx.beginPath();
+            ctx.moveTo(px, py - half); ctx.lineTo(px + half, py + half); ctx.lineTo(px - half, py + half);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            break;
+          case BuildingType.CasterSpawner:
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+              const a = (i * 2 * Math.PI / 5) - Math.PI / 2;
+              const sx = px + Math.cos(a) * half, sy = py + Math.sin(a) * half;
+              if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+            }
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            break;
+          case BuildingType.Tower: {
+            ctx.beginPath();
+            ctx.moveTo(px, py - half); ctx.lineTo(px + half, py);
+            ctx.lineTo(px, py + half); ctx.lineTo(px - half, py);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = rc.primary;
+            ctx.stroke();
+            const towerStats = TOWER_STATS[player.race];
+            const towerUpgrade = getUnitUpgradeMultipliers(b.upgradePath, player.race, BuildingType.Tower);
+            const towerRangeBonus = towerUpgrade.special.towerRangeBonus ?? 0;
+            const effectiveRange = Math.max(1, towerStats.range * towerUpgrade.range) + towerRangeBonus;
+            ctx.beginPath();
+            ctx.arc(px, py, effectiveRange * T, 0, Math.PI * 2);
+            ctx.strokeStyle = `${rc.primary}33`;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            break;
+          }
+          case BuildingType.HarvesterHut: {
+            ctx.beginPath(); ctx.arc(px, py, half, 0, Math.PI * 2);
+            ctx.fill(); ctx.strokeStyle = '#ffd700'; ctx.stroke();
+            const harv = state.harvesters.find(h => h.hutId === b.id);
+            if (harv) {
+              const iconSz = Math.max(8, half * 0.9);
+              const iconX = px - iconSz / 2;
+              const iconY2 = py - iconSz / 2;
+              if (harv.assignment === 'center') {
+                const diamondSprite = this.sprites.getResourceSprite('goldResource');
+                if (diamondSprite) ctx.drawImage(diamondSprite[0], iconX, iconY2, iconSz, iconSz);
+              } else {
+                const iconMap: Record<string, 'gold' | 'wood' | 'meat'> = { base_gold: 'gold', wood: 'wood', stone: 'meat' };
+                this.ui.drawIcon(ctx, iconMap[harv.assignment] || 'gold', iconX, iconY2, iconSz);
+              }
+            }
+            break;
+          }
         }
       }
 
@@ -497,16 +965,13 @@ export class Renderer {
         ctx.fillStyle = rc.primary;
         ctx.globalAlpha = 0.85;
         if (upgradeTier === 1) {
-          // Single pip centered
           ctx.beginPath(); ctx.arc(px, py + half + 2, 1.5, 0, Math.PI * 2); ctx.fill();
         } else {
-          // Two pips side by side
           ctx.beginPath(); ctx.arc(px - 3, py + half + 2, 1.5, 0, Math.PI * 2); ctx.fill();
           ctx.beginPath(); ctx.arc(px + 3, py + half + 2, 1.5, 0, Math.PI * 2); ctx.fill();
         }
         ctx.globalAlpha = 1;
 
-        // Tier 2: brighter border highlight
         if (upgradeTier >= 2) {
           ctx.strokeStyle = rc.primary;
           ctx.globalAlpha = 0.35;
@@ -514,6 +979,32 @@ export class Renderer {
           ctx.strokeRect(px - half - 1, py - half - 1, (half + 1) * 2, (half + 1) * 2);
           ctx.globalAlpha = 1;
         }
+      }
+
+      // Building damage fire overlay when HP < 50%
+      const bHpPct = b.hp / b.maxHp;
+      if (bHpPct < 0.5) {
+        const fireData = this.sprites.getFxSprite('buildingFire');
+        if (fireData) {
+          const [fireImg, fireDef] = fireData;
+          const fireSize = T * 1.2;
+          const fireTick = Math.floor(Date.now() / 80) + b.id;
+          ctx.globalAlpha = bHpPct < 0.25 ? 0.9 : 0.5;
+          drawGridFrame(ctx, fireImg, fireDef as GridSpriteDef, fireTick, px - fireSize / 2, py - half - fireSize * 0.6, fireSize, fireSize);
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      // Damage tint on sprite when HP < 75%
+      if (bHpPct < 0.75 && sprite) {
+        ctx.globalAlpha = 0.15 + (1 - bHpPct) * 0.2;
+        ctx.fillStyle = '#000';
+        const drawW = T + 4;
+        const drawH = (drawW / sprite.width) * sprite.height;
+        const drawX = px - drawW / 2;
+        const drawY = py + half - drawH + 2;
+        ctx.fillRect(drawX, drawY, drawW, drawH);
+        ctx.globalAlpha = 1;
       }
 
       // HP bar (only if damaged)
@@ -531,95 +1022,129 @@ export class Renderer {
 
   // === Projectiles ===
 
-  private drawProjectiles(ctx: CanvasRenderingContext2D, state: GameState): void {
-    for (const p of state.projectiles) {
-      const px = p.x * T, py = p.y * T;
+  private drawOneProjectile(ctx: CanvasRenderingContext2D, state: GameState, p: ProjectileState): void {
+    {
+      const px = p.x * T + T / 2, py = p.y * T + T / 2;
+      const isBottom = p.team === Team.Bottom;
 
-      // Glowing dot
+      // Find target to draw trail line
+      const target = state.units.find(u => u.id === p.targetId);
+      if (target) {
+        const tx = target.x * T + T / 2, ty = target.y * T + T / 2;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(tx, ty);
+        ctx.strokeStyle = isBottom ? 'rgba(79, 195, 247, 0.15)' : 'rgba(255, 138, 101, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Outer glow
       ctx.beginPath();
-      ctx.arc(px, py, 3, 0, Math.PI * 2);
-      ctx.fillStyle = p.team === Team.Bottom ? '#4fc3f7' : '#ff8a65';
+      ctx.arc(px, py, 6, 0, Math.PI * 2);
+      ctx.fillStyle = isBottom ? 'rgba(79, 195, 247, 0.25)' : 'rgba(255, 138, 101, 0.25)';
       ctx.fill();
 
-      // Trail
+      // Core
       ctx.beginPath();
-      ctx.arc(px, py, 5, 0, Math.PI * 2);
-      ctx.fillStyle = p.team === Team.Bottom ? 'rgba(79, 195, 247, 0.3)' : 'rgba(255, 138, 101, 0.3)';
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = isBottom ? '#4fc3f7' : '#ff8a65';
+      ctx.fill();
+
+      // Bright center
+      ctx.beginPath();
+      ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
       ctx.fill();
     }
   }
 
   // === Units ===
 
-  private drawUnits(ctx: CanvasRenderingContext2D, state: GameState): void {
-    for (const u of state.units) {
+  private drawOneUnit(ctx: CanvasRenderingContext2D, state: GameState, u: UnitState): void {
+    {
       const playerColor = PLAYER_COLORS[u.playerId] || '#888';
       const px = u.x * T, py = u.y * T;
       const laneColor = u.lane === Lane.Left ? LANE_LEFT_COLOR : LANE_RIGHT_COLOR;
       const r = u.range > 2 ? 3 : 4;
 
-      // Shape by race + unit category
+      // Try sprite first, fall back to procedural shapes
       const race = state.players[u.playerId]?.race;
-      this.drawUnitShape(ctx, px, py, r, race, u.category, u.team, playerColor);
-      // Lane color center dot
-      ctx.beginPath(); ctx.arc(px, py, 1.5, 0, Math.PI * 2);
-      ctx.fillStyle = laneColor; ctx.fill();
+      const cat = u.category as 'melee' | 'ranged' | 'caster';
+      const isAttacking = u.targetId !== null && u.attackTimer <= u.attackSpeed * 0.5;
+      const spriteData = race ? this.sprites.getUnitSprite(race, cat, u.playerId, isAttacking) : null;
+      if (spriteData) {
+        const [img, def] = spriteData;
+        const drawH = T * 1.4;
+        const aspect = def.frameW / def.frameH;
+        const drawW = drawH * aspect;
+        // Normalize animation: ~1 cycle per second (20 ticks) regardless of frame count
+        const ticksPerFrame = Math.max(1, Math.round(20 / def.cols));
+        const frame = Math.floor(state.tick / ticksPerFrame) % def.cols;
+        // Center horizontally, bottom-anchor vertically on tile center
+        const cx = px + T / 2;
+        const cy = py + T / 2;
+        drawSpriteFrame(ctx, img, def, frame, cx - drawW / 2, cy - drawH * 0.6, drawW, drawH);
+      } else {
+        this.drawUnitShape(ctx, px + T / 2, py + T / 2, r, race, u.category, u.team, playerColor);
+      }
+      // Lane indicator above head: < for left, > for right
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = laneColor;
+      ctx.fillText(u.lane === Lane.Left ? '<' : '>', px + T / 2, py - 1);
 
-      // Status effect visuals
-      const hasSlow = u.statusEffects.find(e => e.type === StatusType.Slow);
-      const hasBurn = u.statusEffects.find(e => e.type === StatusType.Burn);
-      const isSeared = hasSlow && hasBurn; // combo: slow + burn
-      const isBlighted = hasBurn && hasBurn.stacks >= 3; // high burn = regen disabled
+      // Unit center for effects (tile-centered)
+      const ux = px + T / 2, uy = py + T / 2;
+
+      // Status effect visuals — sprite-based VFX overlays
+      const fxTick = Math.floor(Date.now() / 100);
+      const fxSize = r * 3.5;  // effect overlay size relative to unit
 
       for (const eff of u.statusEffects) {
-        if (eff.type === StatusType.Slow) {
-          ctx.beginPath(); ctx.arc(px, py, r + 2, 0, Math.PI * 2);
-          ctx.strokeStyle = isSeared
-            ? `rgba(255, 140, 0, ${0.5 + 0.1 * eff.stacks})` // orange for seared combo
-            : `rgba(41, 121, 255, ${0.3 + 0.1 * eff.stacks})`;
-          ctx.lineWidth = isSeared ? 2 : 1; ctx.stroke();
-        }
         if (eff.type === StatusType.Burn) {
-          ctx.beginPath(); ctx.arc(px, py, r + 2, 0, Math.PI * 2);
-          ctx.strokeStyle = isBlighted
-            ? `rgba(100, 0, 100, ${0.5 + 0.1 * eff.stacks})` // dark purple for blight
-            : `rgba(255, 87, 34, ${0.3 + 0.1 * eff.stacks})`;
-          ctx.lineWidth = isBlighted ? 2 : 1; ctx.stroke();
+          const fxData = this.sprites.getFxSprite('burn');
+          if (fxData) {
+            const [fxImg, fxDef] = fxData;
+            ctx.globalAlpha = Math.min(0.5 + 0.15 * eff.stacks, 1);
+            drawSpriteFrame(ctx, fxImg, fxDef as SpriteDef, fxTick + u.id, ux - fxSize / 2, uy - fxSize * 0.8, fxSize, fxSize);
+            ctx.globalAlpha = 1;
+          }
+        }
+        if (eff.type === StatusType.Slow) {
+          const fxData = this.sprites.getFxSprite('slow');
+          if (fxData) {
+            const [fxImg, fxDef] = fxData;
+            ctx.globalAlpha = Math.min(0.4 + 0.15 * eff.stacks, 0.9);
+            drawSpriteFrame(ctx, fxImg, fxDef as SpriteDef, fxTick + u.id * 3, ux - fxSize / 2, uy - fxSize * 0.6, fxSize, fxSize);
+            ctx.globalAlpha = 1;
+          }
         }
         if (eff.type === StatusType.Haste) {
-          ctx.beginPath(); ctx.arc(px, py, r + 3, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(0, 229, 255, 0.5)';
-          ctx.lineWidth = 1; ctx.setLineDash([2, 3]); ctx.stroke(); ctx.setLineDash([]);
+          const fxData = this.sprites.getFxSprite('haste');
+          if (fxData) {
+            const [fxImg, fxDef] = fxData;
+            ctx.globalAlpha = 0.6;
+            drawSpriteFrame(ctx, fxImg, fxDef as SpriteDef, fxTick + u.id * 2, ux - fxSize / 2, uy - fxSize * 0.7, fxSize, fxSize);
+            ctx.globalAlpha = 1;
+          }
         }
         if (eff.type === StatusType.Shield) {
-          ctx.beginPath(); ctx.arc(px, py, r + 3, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(100, 181, 246, 0.7)';
-          ctx.lineWidth = 2; ctx.stroke();
+          const fxData = this.sprites.getFxSprite('shield');
+          if (fxData) {
+            const [fxImg, fxDef] = fxData;
+            const shieldSize = fxSize * 1.3;
+            ctx.globalAlpha = 0.5;
+            drawGridFrame(ctx, fxImg, fxDef as GridSpriteDef, fxTick + u.id, ux - shieldSize / 2, uy - shieldSize / 2, shieldSize, shieldSize);
+            ctx.globalAlpha = 1;
+          }
         }
       }
 
-      // Seared combo indicator: pulsing orange-blue double ring
-      if (isSeared) {
-        const pulse = 0.5 + 0.3 * Math.sin(Date.now() / 150);
-        ctx.beginPath(); ctx.arc(px, py, r + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255, 100, 0, ${pulse})`;
-        ctx.lineWidth = 1; ctx.setLineDash([2, 2]); ctx.stroke(); ctx.setLineDash([]);
-      }
-
-      // Blight indicator: skull-like X mark
-      if (isBlighted) {
-        ctx.strokeStyle = 'rgba(180, 0, 180, 0.6)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(px - 2, py - r - 5); ctx.lineTo(px + 2, py - r - 1);
-        ctx.moveTo(px + 2, py - r - 5); ctx.lineTo(px - 2, py - r - 1);
-        ctx.stroke();
-      }
-
-      // HP bar (only if damaged)
+      // HP bar (only if damaged) — above unit
       if (u.hp < u.maxHp) {
-        const barW = 10, barH = 2;
-        const barX = px - barW / 2, barY = py - r - 4;
+        const barW = 12, barH = 2;
+        const barX = ux - barW / 2, barY = py - 1;
         const pct = u.hp / u.maxHp;
         ctx.fillStyle = '#111';
         ctx.fillRect(barX, barY, barW, barH);
@@ -629,20 +1154,20 @@ export class Renderer {
 
       // Shield bar (below HP bar)
       if (u.shieldHp > 0) {
-        const barW = 10, barH = 1.5;
-        const barX = px - barW / 2, barY = py - r - 1;
+        const barW = 12, barH = 1.5;
+        const barX = ux - barW / 2, barY = py + 2;
         ctx.fillStyle = 'rgba(100, 181, 246, 0.7)';
         ctx.fillRect(barX, barY, barW * (u.shieldHp / 20), barH);
       }
 
       if (u.carryingDiamond) {
-        ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2);
+        ctx.beginPath(); ctx.arc(ux, uy, 7, 0, Math.PI * 2);
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
       }
 
       // Attack flash
       if (u.attackTimer > 0 && u.attackTimer > Math.round(u.attackSpeed * 20) - 3) {
-        ctx.beginPath(); ctx.arc(px, py, r + 3, 0, Math.PI * 2);
+        ctx.beginPath(); ctx.arc(ux, uy, r + 3, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.lineWidth = 1;
         ctx.stroke();
@@ -660,50 +1185,8 @@ export class Renderer {
     ctx.fillStyle = playerColor;
 
     switch (race) {
-      // ─── SURGE: angular, electric ───
-      case Race.Surge:
-        if (category === 'melee') {
-          // Lightning bolt zigzag
-          ctx.beginPath();
-          ctx.moveTo(px - 1, py - r);
-          ctx.lineTo(px + r * 0.5, py - r * 0.3);
-          ctx.lineTo(px - r * 0.2, py + r * 0.1);
-          ctx.lineTo(px + r * 0.3, py + r);
-          ctx.lineTo(px - r * 0.3, py + r * 0.3);
-          ctx.lineTo(px + r * 0.2, py - r * 0.1);
-          ctx.lineTo(px - r * 0.5, py - r * 0.3);
-          ctx.closePath();
-          ctx.fill();
-        } else if (category === 'ranged') {
-          // Chevron/arrow pointing in move direction
-          const dir = team === Team.Bottom ? -1 : 1;
-          ctx.beginPath();
-          ctx.moveTo(px - r, py + r * 0.5 * dir);
-          ctx.lineTo(px, py - r * dir);
-          ctx.lineTo(px + r, py + r * 0.5 * dir);
-          ctx.lineTo(px + r * 0.5, py + r * 0.5 * dir);
-          ctx.lineTo(px, py - r * 0.3 * dir);
-          ctx.lineTo(px - r * 0.5, py + r * 0.5 * dir);
-          ctx.closePath();
-          ctx.fill();
-        } else {
-          // 4-pointed star/spark
-          ctx.beginPath();
-          const inner = r * 0.35;
-          for (let i = 0; i < 8; i++) {
-            const a = (i * Math.PI / 4) - Math.PI / 2;
-            const rad = i % 2 === 0 ? r : inner;
-            const sx = px + Math.cos(a) * rad;
-            const sy = py + Math.sin(a) * rad;
-            if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
-          }
-          ctx.closePath();
-          ctx.fill();
-        }
-        break;
-
-      // ─── TIDE: rounded, organic ───
-      case Race.Tide:
+      // ─── CROWN: shield + balanced, regal ───
+      case Race.Crown:
         if (category === 'melee') {
           // Shield / rounded rect
           const rr = r * 0.3;
@@ -719,62 +1202,37 @@ export class Renderer {
           ctx.closePath();
           ctx.fill();
         } else if (category === 'ranged') {
-          // Circle (bubble)
+          // Chevron/arrow pointing in move direction
+          const dir = team === Team.Bottom ? -1 : 1;
           ctx.beginPath();
-          ctx.arc(px, py, r, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          // Wave/crescent
-          ctx.beginPath();
-          ctx.arc(px, py, r, 0.3 * Math.PI, 1.7 * Math.PI);
-          ctx.arc(px + r * 0.3, py, r * 0.7, 1.7 * Math.PI, 0.3 * Math.PI, true);
-          ctx.closePath();
-          ctx.fill();
-        }
-        break;
-
-      // ─── EMBER: sharp, aggressive ───
-      case Race.Ember:
-        if (category === 'melee') {
-          // Flame: triangle with notch
-          ctx.beginPath();
-          ctx.moveTo(px, py - r);
-          ctx.lineTo(px + r, py + r);
-          ctx.lineTo(px + r * 0.2, py + r * 0.3);
-          ctx.lineTo(px, py + r * 0.7);
-          ctx.lineTo(px - r * 0.2, py + r * 0.3);
-          ctx.lineTo(px - r, py + r);
-          ctx.closePath();
-          ctx.fill();
-        } else if (category === 'ranged') {
-          // Narrow kite
-          ctx.beginPath();
-          ctx.moveTo(px, py - r * 1.2);
-          ctx.lineTo(px + r * 0.5, py);
-          ctx.lineTo(px, py + r * 0.6);
-          ctx.lineTo(px - r * 0.5, py);
+          ctx.moveTo(px - r, py + r * 0.5 * dir);
+          ctx.lineTo(px, py - r * dir);
+          ctx.lineTo(px + r, py + r * 0.5 * dir);
+          ctx.lineTo(px + r * 0.5, py + r * 0.5 * dir);
+          ctx.lineTo(px, py - r * 0.3 * dir);
+          ctx.lineTo(px - r * 0.5, py + r * 0.5 * dir);
           ctx.closePath();
           ctx.fill();
         } else {
-          // Sunburst: small circle + 6 rays
+          // 4-pointed star (holy)
           ctx.beginPath();
-          ctx.arc(px, py, r * 0.4, 0, Math.PI * 2);
-          ctx.fill();
-          for (let i = 0; i < 6; i++) {
-            const a = i * Math.PI / 3;
-            ctx.beginPath();
-            ctx.moveTo(px + Math.cos(a - 0.2) * r * 0.35, py + Math.sin(a - 0.2) * r * 0.35);
-            ctx.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r);
-            ctx.lineTo(px + Math.cos(a + 0.2) * r * 0.35, py + Math.sin(a + 0.2) * r * 0.35);
-            ctx.fill();
+          const inner = r * 0.35;
+          for (let i = 0; i < 8; i++) {
+            const a = (i * Math.PI / 4) - Math.PI / 2;
+            const rad = i % 2 === 0 ? r : inner;
+            const sx = px + Math.cos(a) * rad;
+            const sy = py + Math.sin(a) * rad;
+            if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
           }
+          ctx.closePath();
+          ctx.fill();
         }
         break;
 
-      // ─── BASTION: heavy, geometric ───
-      case Race.Bastion:
+      // ─── HORDE: heavy, brutish ───
+      case Race.Horde:
         if (category === 'melee') {
-          // Cross/plus
+          // Cross/plus (heavy)
           const arm = r * 0.4;
           ctx.beginPath();
           ctx.moveTo(px - arm, py - r);
@@ -814,45 +1272,130 @@ export class Renderer {
         }
         break;
 
-      // ─── SHADE: wispy, sinister ───
-      case Race.Shade:
+      // ─── GOBLINS: fast, pointy ───
+      case Race.Goblins:
         if (category === 'melee') {
-          // Curved dagger / fang shape
+          // Narrow dagger
           ctx.beginPath();
           ctx.moveTo(px, py - r);
-          ctx.quadraticCurveTo(px + r * 1.2, py - r * 0.2, px + r * 0.3, py + r);
-          ctx.lineTo(px, py + r * 0.4);
-          ctx.lineTo(px - r * 0.3, py + r);
-          ctx.quadraticCurveTo(px - r * 1.2, py - r * 0.2, px, py - r);
+          ctx.lineTo(px + r * 0.4, py + r * 0.3);
+          ctx.lineTo(px + r * 0.2, py + r);
+          ctx.lineTo(px - r * 0.2, py + r);
+          ctx.lineTo(px - r * 0.4, py + r * 0.3);
           ctx.closePath();
           ctx.fill();
         } else if (category === 'ranged') {
-          // Eye/slit shape
+          // Narrow kite
+          ctx.beginPath();
+          ctx.moveTo(px, py - r * 1.2);
+          ctx.lineTo(px + r * 0.5, py);
+          ctx.lineTo(px, py + r * 0.6);
+          ctx.lineTo(px - r * 0.5, py);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Hexing eye
           ctx.beginPath();
           ctx.moveTo(px - r, py);
           ctx.quadraticCurveTo(px, py - r * 1.1, px + r, py);
           ctx.quadraticCurveTo(px, py + r * 1.1, px - r, py);
           ctx.closePath();
           ctx.fill();
+        }
+        break;
+
+      // ─── OOZLINGS: blobby, round ───
+      case Race.Oozlings:
+        if (category === 'melee') {
+          // Small circle blob
+          ctx.beginPath();
+          ctx.arc(px, py, r * 0.8, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (category === 'ranged') {
+          // Spore: 3-lobed trefoil
+          for (let i = 0; i < 3; i++) {
+            const a = (i * Math.PI * 2 / 3) - Math.PI / 2;
+            ctx.beginPath();
+            ctx.arc(px + Math.cos(a) * r * 0.35, py + Math.sin(a) * r * 0.35, r * 0.45, 0, Math.PI * 2);
+            ctx.fill();
+          }
         } else {
-          // Void portal: ring with gap
+          // Wave/pulse ring
           ctx.beginPath();
           ctx.arc(px, py, r, 0, Math.PI * 2);
           ctx.fill();
           ctx.fillStyle = '#0a0a0a';
           ctx.beginPath();
-          ctx.arc(px, py, r * 0.55, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = playerColor;
-          // Inner dot
-          ctx.beginPath();
-          ctx.arc(px, py, r * 0.2, 0, Math.PI * 2);
+          ctx.arc(px, py, r * 0.5, 0, Math.PI * 2);
           ctx.fill();
         }
         break;
 
-      // ─── THORN: organic, spiky ───
-      case Race.Thorn:
+      // ─── DEMON: sharp, aggressive ───
+      case Race.Demon:
+        if (category === 'melee') {
+          // Flame: triangle with notch
+          ctx.beginPath();
+          ctx.moveTo(px, py - r);
+          ctx.lineTo(px + r, py + r);
+          ctx.lineTo(px + r * 0.2, py + r * 0.3);
+          ctx.lineTo(px, py + r * 0.7);
+          ctx.lineTo(px - r * 0.2, py + r * 0.3);
+          ctx.lineTo(px - r, py + r);
+          ctx.closePath();
+          ctx.fill();
+        } else if (category === 'ranged') {
+          // Narrow kite (firebolt)
+          ctx.beginPath();
+          ctx.moveTo(px, py - r * 1.2);
+          ctx.lineTo(px + r * 0.5, py);
+          ctx.lineTo(px, py + r * 0.6);
+          ctx.lineTo(px - r * 0.5, py);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Sunburst: small circle + 6 rays
+          ctx.beginPath();
+          ctx.arc(px, py, r * 0.4, 0, Math.PI * 2);
+          ctx.fill();
+          for (let i = 0; i < 6; i++) {
+            const a = i * Math.PI / 3;
+            ctx.beginPath();
+            ctx.moveTo(px + Math.cos(a - 0.2) * r * 0.35, py + Math.sin(a - 0.2) * r * 0.35);
+            ctx.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r);
+            ctx.lineTo(px + Math.cos(a + 0.2) * r * 0.35, py + Math.sin(a + 0.2) * r * 0.35);
+            ctx.fill();
+          }
+        }
+        break;
+
+      // ─── DEEP: rounded, control ───
+      case Race.Deep:
+        if (category === 'melee') {
+          // Shell: rounded shield
+          ctx.beginPath();
+          ctx.arc(px, py - r * 0.1, r, Math.PI, 0);
+          ctx.lineTo(px + r * 0.5, py + r);
+          ctx.lineTo(px - r * 0.5, py + r);
+          ctx.closePath();
+          ctx.fill();
+        } else if (category === 'ranged') {
+          // Circle (bubble)
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Wave/crescent
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0.3 * Math.PI, 1.7 * Math.PI);
+          ctx.arc(px + r * 0.3, py, r * 0.7, 1.7 * Math.PI, 0.3 * Math.PI, true);
+          ctx.closePath();
+          ctx.fill();
+        }
+        break;
+
+      // ─── WILD: organic, spiky ───
+      case Race.Wild:
         if (category === 'melee') {
           // Thorny pentagon with spikes
           ctx.beginPath();
@@ -896,6 +1439,74 @@ export class Renderer {
         }
         break;
 
+      // ─── GEISTS: wispy, sinister ───
+      case Race.Geists:
+        if (category === 'melee') {
+          // Curved dagger / fang shape
+          ctx.beginPath();
+          ctx.moveTo(px, py - r);
+          ctx.quadraticCurveTo(px + r * 1.2, py - r * 0.2, px + r * 0.3, py + r);
+          ctx.lineTo(px, py + r * 0.4);
+          ctx.lineTo(px - r * 0.3, py + r);
+          ctx.quadraticCurveTo(px - r * 1.2, py - r * 0.2, px, py - r);
+          ctx.closePath();
+          ctx.fill();
+        } else if (category === 'ranged') {
+          // Eye/slit shape
+          ctx.beginPath();
+          ctx.moveTo(px - r, py);
+          ctx.quadraticCurveTo(px, py - r * 1.1, px + r, py);
+          ctx.quadraticCurveTo(px, py + r * 1.1, px - r, py);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Void portal: ring with gap
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#0a0a0a';
+          ctx.beginPath();
+          ctx.arc(px, py, r * 0.55, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = playerColor;
+          ctx.beginPath();
+          ctx.arc(px, py, r * 0.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+
+      // ─── TENDERS: organic, gentle ───
+      case Race.Tenders:
+        if (category === 'melee') {
+          // Treant: wide rounded
+          ctx.beginPath();
+          ctx.arc(px, py - r * 0.2, r * 0.7, Math.PI, 0);
+          ctx.lineTo(px + r, py + r);
+          ctx.lineTo(px - r, py + r);
+          ctx.closePath();
+          ctx.fill();
+        } else if (category === 'ranged') {
+          // Seed/teardrop
+          ctx.beginPath();
+          ctx.moveTo(px, py - r);
+          ctx.quadraticCurveTo(px + r, py, px, py + r);
+          ctx.quadraticCurveTo(px - r, py, px, py - r);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Flower: circle + 4 petals
+          ctx.beginPath();
+          ctx.arc(px, py, r * 0.35, 0, Math.PI * 2);
+          ctx.fill();
+          for (let i = 0; i < 4; i++) {
+            const a = (i * Math.PI / 2) - Math.PI / 4;
+            ctx.beginPath();
+            ctx.arc(px + Math.cos(a) * r * 0.5, py + Math.sin(a) * r * 0.5, r * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        break;
+
       // ─── FALLBACK: original shapes ───
       default:
         if (category === 'melee') {
@@ -923,29 +1534,28 @@ export class Renderer {
 
   // === Harvesters ===
 
-  private drawHarvesters(ctx: CanvasRenderingContext2D, state: GameState): void {
-    for (const h of state.harvesters) {
-      if (h.state === 'dead') continue;
+  private drawOneHarvester(ctx: CanvasRenderingContext2D, state: GameState, h: HarvesterState): void {
+    {
       const px = h.x * T, py = h.y * T;
 
-      let color = PLAYER_COLORS[h.playerId] || (h.team === Team.Bottom ? '#64b5f6' : '#ef9a9a');
-      if (h.state === 'fighting') color = '#ff5722';
-
-      ctx.beginPath();
-      ctx.moveTo(px, py - 4); ctx.lineTo(px + 4, py + 4); ctx.lineTo(px - 4, py + 4);
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-
-      if (h.state === 'mining') {
-        ctx.strokeStyle = '#ffd700';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI * 2); ctx.stroke();
-      }
-
-      if (h.carryingResource || h.carryingDiamond) {
-        ctx.fillStyle = h.carryingDiamond ? '#fff' : '#ffd700';
-        ctx.beginPath(); ctx.arc(px, py - 6, 2.5, 0, Math.PI * 2); ctx.fill();
+      const spriteData = this.sprites.getHarvesterSprite(h.playerId, h.state, h.carryingResource, h.assignment);
+      if (spriteData) {
+        const [img, def] = spriteData;
+        const drawH = T * 1.2;
+        const aspect = def.frameW / def.frameH;
+        const drawW = drawH * aspect;
+        const ticksPerFrame = Math.max(1, Math.round(20 / def.cols));
+        const frame = Math.floor(state.tick / ticksPerFrame) % def.cols;
+        drawSpriteFrame(ctx, img, def, frame, px - drawW / 2, py - drawH * 0.6, drawW, drawH);
+      } else {
+        // Fallback procedural
+        let color = PLAYER_COLORS[h.playerId] || (h.team === Team.Bottom ? '#64b5f6' : '#ef9a9a');
+        if (h.state === 'fighting') color = '#ff5722';
+        ctx.beginPath();
+        ctx.moveTo(px, py - 4); ctx.lineTo(px + 4, py + 4); ctx.lineTo(px - 4, py + 4);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
       }
 
       if (h.carryingDiamond) {
@@ -997,10 +1607,21 @@ export class Renderer {
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      ctx.fillStyle = '#ffe082';
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('MINE CENTER TO EXPOSE DIAMOND', px, py - r - 10);
+      const labelText = 'MINE CENTER TO EXPOSE DIAMOND';
+      const labelY = py - r - 10;
+      const labelW = ctx.measureText(labelText).width;
+      // Dark background pill for readability
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+      const pillPadX = 6, pillPadY = 4;
+      ctx.beginPath();
+      const pillR = pillPadY + 5;
+      ctx.roundRect(px - labelW / 2 - pillPadX, labelY - pillPadY - 5, labelW + pillPadX * 2, pillPadY * 2 + 10, pillR);
+      ctx.fill();
+      // White text for contrast
+      ctx.fillStyle = '#fff';
+      ctx.fillText(labelText, px, labelY);
       ctx.textAlign = 'start';
       return;
     }
@@ -1128,32 +1749,45 @@ export class Renderer {
       const px = n.x * T, py = n.y * T;
       const r = n.radius * T;
 
-      if (progress < 0.3) {
-        // Expanding flash
-        const expandPct = progress / 0.3;
-        ctx.beginPath();
-        ctx.arc(px, py, r * expandPct, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 100, 0, ${0.8 * (1 - expandPct)})`;
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(px, py, r * expandPct * 0.5, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 255, 200, ${0.9 * (1 - expandPct)})`;
-        ctx.fill();
+      // Scorched ground (persists throughout)
+      const ringAlpha = Math.max(0, 1 - progress);
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(50, 20, 0, ${ringAlpha * 0.3})`;
+      ctx.fill();
+
+      if (progress < 0.4) {
+        // Shockwave sprite expanding outward
+        const shockData = this.sprites.getFxSprite('nukeShockwave');
+        if (shockData) {
+          const [shockImg, shockDef] = shockData;
+          const expandPct = progress / 0.4;
+          const shockSize = r * 2 * expandPct;
+          ctx.globalAlpha = 0.8 * (1 - expandPct);
+          drawGridFrame(ctx, shockImg, shockDef as GridSpriteDef,
+            Math.floor(expandPct * (shockDef as GridSpriteDef).totalFrames),
+            px - shockSize / 2, py - shockSize / 2, shockSize, shockSize);
+          ctx.globalAlpha = 1;
+        }
+
+        // Explosion sprites at center
+        const explData = this.sprites.getFxSprite('explosion');
+        if (explData) {
+          const [explImg, explDef] = explData;
+          const explSize = r * 1.2;
+          const explFrame = Math.floor((progress / 0.4) * explDef.cols);
+          ctx.globalAlpha = 0.9 * (1 - progress / 0.4);
+          drawSpriteFrame(ctx, explImg, explDef as SpriteDef, explFrame, px - explSize / 2, py - explSize / 2, explSize, explSize);
+          ctx.globalAlpha = 1;
+        }
       }
 
       // Fading ring
-      const ringAlpha = Math.max(0, 1 - progress);
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(255, 80, 0, ${ringAlpha * 0.5})`;
       ctx.lineWidth = 3;
       ctx.stroke();
-
-      // Scorched ground
-      ctx.beginPath();
-      ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(50, 20, 0, ${ringAlpha * 0.3})`;
-      ctx.fill();
     }
   }
 
@@ -1163,21 +1797,36 @@ export class Renderer {
     const player = state.players[0];
     if (!player) return;
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-    ctx.fillRect(0, 0, this.canvas.width, 56);
+    // HUD background - wood table 9-slice
+    if (!this.ui.drawWoodTable(ctx, 0, 0, this.canvas.width, 56)) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+      ctx.fillRect(0, 0, this.canvas.width, 56);
+    }
 
     ctx.font = 'bold 14px monospace';
     let x = 12;
     const y = 30;
+    const iconSz = 22;
+    const iconY = y - iconSz + 4;
 
     const ps = state.playerStats?.[0];
-    const elapsed = Math.max(1, state.tick / 20); // seconds since match start
+    const elapsed = Math.max(1, state.tick / 20);
     const goldRate = ps ? (ps.totalGoldEarned / elapsed).toFixed(1) : '?';
     const woodRate = ps ? (ps.totalWoodEarned / elapsed).toFixed(1) : '?';
     const stoneRate = ps ? (ps.totalStoneEarned / elapsed).toFixed(1) : '?';
-    ctx.fillStyle = '#ffd700'; ctx.fillText(`Gold: ${player.gold} (+${goldRate}/s)`, x, y); x += 160;
-    ctx.fillStyle = '#4caf50'; ctx.fillText(`Wood: ${player.wood} (+${woodRate}/s)`, x, y); x += 150;
-    ctx.fillStyle = '#9e9e9e'; ctx.fillText(`Stone: ${player.stone} (+${stoneRate}/s)`, x, y); x += 150;
+
+    // Gold icon + text
+    this.ui.drawIcon(ctx, 'gold', x, iconY, iconSz);
+    x += iconSz + 2;
+    ctx.fillStyle = '#ffd700'; ctx.fillText(`${player.gold} (+${goldRate}/s)`, x, y); x += 130;
+    // Wood icon + text
+    this.ui.drawIcon(ctx, 'wood', x, iconY, iconSz);
+    x += iconSz + 2;
+    ctx.fillStyle = '#4caf50'; ctx.fillText(`${player.wood} (+${woodRate}/s)`, x, y); x += 130;
+    // Stone/meat icon + text
+    this.ui.drawIcon(ctx, 'meat', x, iconY, iconSz);
+    x += iconSz + 2;
+    ctx.fillStyle = '#9e9e9e'; ctx.fillText(`${player.stone} (+${stoneRate}/s)`, x, y); x += 130;
     ctx.fillStyle = player.nukeAvailable ? '#ff5722' : '#555';
     ctx.fillText(`Nuke: ${player.nukeAvailable ? 'READY [N]' : 'USED'}`, x, y); x += 160;
 
@@ -1207,21 +1856,23 @@ export class Renderer {
     let x2 = 12;
     ctx.font = 'bold 11px monospace';
 
-    // HQ health bars
+    // HQ health bars (using UI bar sprites)
     const btmHp = state.hqHp[Team.Bottom];
     const topHp = state.hqHp[Team.Top];
-    const hqBarW = 60;
-    const hqBarH = 6;
-    const drawHQBar = (label: string, hp: number, color: string, xPos: number) => {
-      ctx.fillStyle = '#999';
+    const hqBarW = 80;
+    const hqBarH = 14;
+    const drawHQBar = (label: string, hp: number, _color: string, xPos: number) => {
+      ctx.fillStyle = '#ddd';
       ctx.fillText(label, xPos, y2);
       const barX = xPos + ctx.measureText(label).width + 4;
-      ctx.fillStyle = '#222';
-      ctx.fillRect(barX, y2 - hqBarH, hqBarW, hqBarH);
       const pct = Math.max(0, hp / HQ_HP);
-      ctx.fillStyle = pct > 0.5 ? color : pct > 0.25 ? '#ff9800' : '#f44336';
-      ctx.fillRect(barX, y2 - hqBarH, hqBarW * pct, hqBarH);
-      ctx.fillStyle = '#ccc';
+      if (!this.ui.drawBar(ctx, barX, y2 - hqBarH, hqBarW, hqBarH, pct)) {
+        ctx.fillStyle = '#222';
+        ctx.fillRect(barX, y2 - hqBarH, hqBarW, hqBarH);
+        ctx.fillStyle = pct > 0.5 ? _color : pct > 0.25 ? '#ff9800' : '#f44336';
+        ctx.fillRect(barX, y2 - hqBarH, hqBarW * pct, hqBarH);
+      }
+      ctx.fillStyle = '#fff';
       ctx.font = '9px monospace';
       ctx.fillText(`${hp}`, barX + hqBarW + 4, y2);
       ctx.font = 'bold 11px monospace';
@@ -1290,12 +1941,12 @@ export class Renderer {
     const scaleX = mmW / MAP_WIDTH;
     const scaleY = mmH / MAP_HEIGHT;
 
-    // Background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    // Background — water color
+    ctx.fillStyle = 'rgba(60, 110, 100, 0.9)';
     ctx.fillRect(mx - 2, my - 2, mmW + 4, mmH + 4);
 
-    // Map shape outline
-    ctx.strokeStyle = '#333';
+    // Map shape — grass fill
+    ctx.strokeStyle = '#2a5a2a';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let y = 0; y <= MAP_HEIGHT; y += 4) {
@@ -1308,7 +1959,7 @@ export class Renderer {
       ctx.lineTo(mx + (MAP_WIDTH - m) * scaleX, my + y * scaleY);
     }
     ctx.closePath();
-    ctx.fillStyle = '#111';
+    ctx.fillStyle = '#3a6b3a';
     ctx.fill();
     ctx.stroke();
 
