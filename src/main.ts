@@ -1,6 +1,7 @@
 import { SceneManager } from './scenes/Scene';
 import { TitleScene } from './scenes/TitleScene';
 import { RaceSelectScene } from './scenes/RaceSelectScene';
+import { DifficultySelectScene } from './scenes/DifficultySelectScene';
 import { MatchScene } from './scenes/MatchScene';
 import { PostMatchScene } from './scenes/PostMatchScene';
 import { UnitGalleryScene } from './scenes/UnitGalleryScene';
@@ -35,6 +36,9 @@ uiReady.then(() => {
   titleScene.profile = profile;
   const postMatchScene = new PostMatchScene(manager, canvas, sharedUI);
 
+  // Track selected race between scenes
+  let selectedRace: Race = Race.Crown;
+
   const matchScene = new MatchScene(canvas, sharedUI, (game) => {
     recordMatch(game.state);
     const newAch = updateProfileFromMatch(profile, game.state, game.playerSlot);
@@ -47,8 +51,13 @@ uiReady.then(() => {
     manager.switchTo('postMatch');
   });
 
-  const raceSelectScene = new RaceSelectScene(manager, canvas, sharedSprites, sharedUI, (result) => {
-    matchScene.setPlayerRace(result.playerRace, result.botDifficulty);
+  const raceSelectScene = new RaceSelectScene(manager, canvas, sharedSprites, sharedUI, (race) => {
+    selectedRace = race;
+    manager.switchTo('difficultySelect');
+  });
+
+  const difficultySelectScene = new DifficultySelectScene(manager, canvas, sharedUI, (difficulty) => {
+    matchScene.setPlayerRace(selectedRace, difficulty);
     manager.switchTo('match');
   });
 
@@ -66,6 +75,7 @@ uiReady.then(() => {
 
   manager.register('title', titleScene);
   manager.register('raceSelect', raceSelectScene);
+  manager.register('difficultySelect', difficultySelectScene);
   manager.register('match', matchScene);
   manager.register('postMatch', postMatchScene);
   manager.register('gallery', galleryScene);

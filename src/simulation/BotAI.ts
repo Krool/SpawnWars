@@ -483,7 +483,7 @@ function runSingleBotAI(state: GameState, ctx: BotContext, playerId: number, emi
   // 4. Harvesters — check every ~3 seconds
   const harvInterval = Math.max(40, Math.floor(60 / urgency));
   if (state.tick - (ctx.lastHarvesterTick[playerId] ?? 0) >= harvInterval) {
-    botManageHarvesters(state, playerId, player, gameMinutes, emit);
+    botManageHarvesters(state, playerId, player, myBuildings, gameMinutes, emit);
     ctx.lastHarvesterTick[playerId] = state.tick;
   }
 
@@ -936,8 +936,61 @@ function botEvaluateLanes(
 
 // ==================== HARVESTER MANAGEMENT ====================
 
+/** Analyze what the bot wants to build/upgrade next and find the bottleneck resource. */
+function findBottleneckResource(
+  player: GameState['players'][0],
+  myBuildings: GameState['buildings'],
+): { bottleneck: HarvesterAssignment | null; goldDeficit: number; woodDeficit: number; stoneDeficit: number } {
+  const race = player.race;
+  const costs = RACE_BUILDING_COSTS[race];
+  const upgCosts = RACE_UPGRADE_COSTS[race];
+
+  // Collect costs of the next few things the bot likely wants
+  let wantGold = 0, wantWood = 0, wantStone = 0;
+
+  // Next building: check each type we might want, weighted by how many we have
+  const spawnerTypes = [BuildingType.MeleeSpawner, BuildingType.RangedSpawner, BuildingType.CasterSpawner];
+  const spawnerCount = myBuildings.filter(b => spawnerTypes.includes(b.type)).length;
+
+  if (spawnerCount < 5) {
+    // Average cost of the spawner types we'd build
+    for (const t of spawnerTypes) {
+      const c = costs[t];
+      wantGold += c.gold;
+      wantWood += c.wood;
+      wantStone += c.stone;
+    }
+  }
+
+  // Next upgrade: look at buildings that can still be upgraded
+  const upgradeable = myBuildings.filter(b => b.type !== BuildingType.HarvesterHut && b.upgradePath.length < 3);
+  if (upgradeable.length > 0) {
+    // Cheapest upcoming upgrade
+    const nextUpg = upgradeable[0];
+    const uc = nextUpg.upgradePath.length === 1 ? upgCosts.tier1 : upgCosts.tier2;
+    wantGold += uc.gold;
+    wantWood += uc.wood;
+    wantStone += uc.stone;
+  }
+
+  // How far short are we for these upcoming purchases?
+  const goldDeficit = Math.max(0, wantGold - player.gold);
+  const woodDeficit = Math.max(0, wantWood - player.wood);
+  const stoneDeficit = Math.max(0, wantStone - player.stone);
+
+  // Bottleneck = the resource with the biggest deficit (only if we actually need it)
+  let bottleneck: HarvesterAssignment | null = null;
+  let maxDeficit = 10; // minimum threshold to care
+  if (goldDeficit > maxDeficit) { bottleneck = HarvesterAssignment.BaseGold; maxDeficit = goldDeficit; }
+  if (woodDeficit > maxDeficit) { bottleneck = HarvesterAssignment.Wood; maxDeficit = woodDeficit; }
+  if (stoneDeficit > maxDeficit) { bottleneck = HarvesterAssignment.Stone; maxDeficit = stoneDeficit; }
+
+  return { bottleneck, goldDeficit, woodDeficit, stoneDeficit };
+}
+
 function botManageHarvesters(
   state: GameState, playerId: number, player: GameState['players'][0],
+  myBuildings: GameState['buildings'],
   gameMinutes: number, emit: Emit,
 ): void {
   const myHarvesters = state.harvesters.filter(h => h.playerId === playerId);
@@ -968,6 +1021,9 @@ function botManageHarvesters(
   const primaryRes = resNeeds[0][1] > 0 ? resNeeds[0][0] : HarvesterAssignment.BaseGold;
   const secondaryRes = resNeeds[1][1] > 0 ? resNeeds[1][0] : resNeeds[0][0];
 
+  // Context-aware bottleneck: what resource do we actually need right now?
+  const { bottleneck } = findBottleneckResource(player, myBuildings);
+
   const resOf = (a: HarvesterAssignment): number => {
     if (a === HarvesterAssignment.BaseGold || a === HarvesterAssignment.Center) return player.gold;
     if (a === HarvesterAssignment.Wood) return player.wood;
@@ -984,21 +1040,41 @@ function botManageHarvesters(
 
   for (let i = 0; i < myHarvesters.length; i++) {
     const h = myHarvesters[i];
+
+    // Don't interrupt harvesters that are actively mining or carrying resources home
+    if (h.state === 'mining' || h.state === 'walking_home') continue;
+
     let desired: HarvesterAssignment;
 
     if (i < 2) {
-      // First two harvesters: primary resource (or secondary if starved/overflowing)
-      if (primaryStarved || primaryOverflow) desired = secondaryRes;
-      else desired = primaryRes;
+      // First two harvesters: primary resource, but shift to bottleneck if identified
+      if (bottleneck && bottleneck !== primaryRes && bottleneck !== secondaryRes) {
+        // Bottleneck is a resource we don't normally collect much of — dedicate one harvester
+        desired = i === 0 ? bottleneck : primaryRes;
+      } else if (bottleneck && bottleneck === secondaryRes) {
+        // We need more of our secondary — split attention
+        desired = i === 0 ? primaryRes : secondaryRes;
+      } else if (primaryStarved || primaryOverflow) {
+        desired = secondaryRes;
+      } else {
+        desired = primaryRes;
+      }
     } else if (i < 3) {
-      // Third: secondary resource (or primary if secondary starved/overflowing)
-      if (secondaryStarved || secondaryOverflow) desired = primaryRes;
-      else desired = secondaryRes;
+      // Third: secondary resource, or bottleneck if different
+      if (bottleneck && bottleneck !== primaryRes && bottleneck !== secondaryRes) {
+        desired = bottleneck;
+      } else if (secondaryStarved || secondaryOverflow) {
+        desired = primaryRes;
+      } else {
+        desired = secondaryRes;
+      }
     } else if (i === 3) {
-      // Fourth: balance or diamond (only if race wants diamond)
+      // Fourth: balance or diamond
       const likesDiamond = RACE_LIKES_DIAMOND[race];
       if (likesDiamond && gameMinutes > 3 && !diamondExposed) {
         desired = HarvesterAssignment.Center;
+      } else if (bottleneck) {
+        desired = bottleneck;
       } else if (primaryAmt <= secondaryAmt) {
         desired = primaryRes;
       } else {
@@ -1010,7 +1086,7 @@ function botManageHarvesters(
       if (likesDiamond && (diamondExposed || gameMinutes > 4)) {
         desired = HarvesterAssignment.Center;
       } else if (goldMostlyMined || !likesDiamond) {
-        desired = i % 2 === 0 ? primaryRes : secondaryRes;
+        desired = bottleneck ?? (i % 2 === 0 ? primaryRes : secondaryRes);
       } else {
         desired = HarvesterAssignment.Center;
       }
