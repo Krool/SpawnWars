@@ -2,8 +2,8 @@ import { Game } from '../game/Game';
 import { Camera } from '../rendering/Camera';
 import { Renderer } from '../rendering/Renderer';
 import {
-  BuildingType, TILE_SIZE, BUILD_GRID_COLS, BUILD_GRID_ROWS, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS, Lane,
-  HarvesterAssignment, Team, ZONES, Race, UnitState, HUT_GRID_COLS,
+  BuildingType, TILE_SIZE, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS, Lane,
+  HarvesterAssignment, Team, ZONES, Race, UnitState,
 } from '../simulation/types';
 import { getBuildGridOrigin, getTeamAlleyOrigin, getHutGridOrigin } from '../simulation/GameState';
 import { RACE_BUILDING_COSTS, UNIT_STATS, TOWER_STATS, RACE_COLORS } from '../simulation/data';
@@ -459,8 +459,8 @@ export class InputHandler {
       this.camera.panTo(cx, cy, 1.8);
     } else {
       const origin = getBuildGridOrigin(this.pid, this.game.state.mapDef);
-      const cx = (origin.x + BUILD_GRID_COLS / 2) * TILE_SIZE;
-      const cy = (origin.y + BUILD_GRID_ROWS / 2) * TILE_SIZE;
+      const cx = (origin.x + this.game.state.mapDef.buildGridCols / 2) * TILE_SIZE;
+      const cy = (origin.y + this.game.state.mapDef.buildGridRows / 2) * TILE_SIZE;
       this.camera.panTo(cx, cy, 1.8);
     }
   }
@@ -468,8 +468,8 @@ export class InputHandler {
   /** Pan camera to the harvester hut area */
   private panToHutArea(): void {
     const origin = getHutGridOrigin(this.pid, this.game.state.mapDef);
-    const cx = (origin.x + HUT_GRID_COLS / 2) * TILE_SIZE;
-    const cy = (origin.y + 0.5) * TILE_SIZE;
+    const cx = (origin.x + this.game.state.mapDef.hutGridCols / 2) * TILE_SIZE;
+    const cy = (origin.y + this.game.state.mapDef.hutGridRows / 2) * TILE_SIZE;
     this.camera.panTo(cx, cy, 1.8);
   }
 
@@ -490,7 +490,7 @@ export class InputHandler {
     // Military grid
     const origin = getBuildGridOrigin(playerId, this.game.state.mapDef);
     const gx = tx - origin.x, gy = ty - origin.y;
-    if (gx < 0 || gx >= BUILD_GRID_COLS || gy < 0 || gy >= BUILD_GRID_ROWS) return null;
+    if (gx < 0 || gx >= this.game.state.mapDef.buildGridCols || gy < 0 || gy >= this.game.state.mapDef.buildGridRows) return null;
     return { gx, gy, isAlley: false };
   }
 
@@ -1739,16 +1739,25 @@ export class InputHandler {
       const origin = getHutGridOrigin(this.pid, this.game.state.mapDef);
       const myHuts = this.game.state.buildings.filter(b => b.playerId === this.pid && b.type === BuildingType.HarvesterHut);
       const occupiedSlots = new Set(myHuts.map(b => b.gridX));
-      // Show next auto-placement slot with a bright highlight
-      const CENTER_OUT = [4, 5, 3, 6, 2, 7, 1, 8, 0, 9];
-      const nextSlot = CENTER_OUT.find(gx => !occupiedSlots.has(gx));
-      for (let gx = 0; gx < HUT_GRID_COLS; gx++) {
-        const wx = (origin.x + gx) * TILE_SIZE;
-        const wy = origin.y * TILE_SIZE;
-        const occupied = occupiedSlots.has(gx);
-        const isNext = gx === nextSlot;
+      const hutCols = this.game.state.mapDef.hutGridCols;
+      const hutRows = this.game.state.mapDef.hutGridRows;
+      const totalSlots = hutCols * hutRows;
+      // Build center-out order
+      const CENTER_OUT: number[] = [];
+      for (let d = 0; d <= Math.floor(totalSlots / 2); d++) {
+        const mid = Math.floor(totalSlots / 2);
+        if (mid + d < totalSlots) CENTER_OUT.push(mid + d);
+        if (d > 0 && mid - d >= 0) CENTER_OUT.push(mid - d);
+      }
+      const nextSlot = CENTER_OUT.find(s => !occupiedSlots.has(s));
+      for (let slot = 0; slot < totalSlots; slot++) {
+        const sgx = slot % hutCols;
+        const sgy = Math.floor(slot / hutCols);
+        const wx = (origin.x + sgx) * TILE_SIZE;
+        const wy = (origin.y + sgy) * TILE_SIZE;
+        const occupied = occupiedSlots.has(slot);
+        const isNext = slot === nextSlot;
         if (isNext) {
-          // Pulsing highlight for next placement
           const pulse = 0.5 + 0.3 * Math.sin(Date.now() / 200);
           ctx.fillStyle = `rgba(60, 255, 60, ${pulse * 0.3})`;
           ctx.fillRect(wx, wy, TILE_SIZE, TILE_SIZE);
@@ -1768,8 +1777,8 @@ export class InputHandler {
     // Highlight military grid slots (for non-tower, non-hut types)
     if (!isTower && !isHut) {
       const origin = getBuildGridOrigin(this.pid, this.game.state.mapDef);
-      for (let gy = 0; gy < BUILD_GRID_ROWS; gy++) {
-        for (let gx = 0; gx < BUILD_GRID_COLS; gx++) {
+      for (let gy = 0; gy < this.game.state.mapDef.buildGridRows; gy++) {
+        for (let gx = 0; gx < this.game.state.mapDef.buildGridCols; gx++) {
           const wx = (origin.x + gx) * TILE_SIZE;
           const wy = (origin.y + gy) * TILE_SIZE;
           const occupied = this.game.state.buildings.some(

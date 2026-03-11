@@ -3,7 +3,7 @@ import { SpriteLoader, drawSpriteFrame, drawGridFrame, type SpriteDef, type Grid
 import { UIAssets } from './UIAssets';
 import {
   GameState, Team, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE,
-  ZONES, BUILD_GRID_COLS, BUILD_GRID_ROWS, HUT_GRID_COLS, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS,
+  ZONES, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS,
   HQ_WIDTH, HQ_HEIGHT, HQ_HP,
   BuildingType, Lane, Vec2,
   StatusType, Race, ResourceType,
@@ -871,33 +871,35 @@ export class Renderer {
       const tc = hexToRgba(pc);
 
       ctx.fillStyle = tc + '0.18)';
-      ctx.fillRect(origin.x * T, origin.y * T, BUILD_GRID_COLS * T, BUILD_GRID_ROWS * T);
+      const bgCols = state.mapDef.buildGridCols;
+      const bgRows = state.mapDef.buildGridRows;
+      ctx.fillRect(origin.x * T, origin.y * T, bgCols * T, bgRows * T);
 
       ctx.strokeStyle = tc + '0.35)';
       ctx.lineWidth = 0.5;
-      for (let gx = 0; gx <= BUILD_GRID_COLS; gx++) {
+      for (let gx = 0; gx <= bgCols; gx++) {
         ctx.beginPath();
         ctx.moveTo((origin.x + gx) * T, origin.y * T);
-        ctx.lineTo((origin.x + gx) * T, (origin.y + BUILD_GRID_ROWS) * T);
+        ctx.lineTo((origin.x + gx) * T, (origin.y + bgRows) * T);
         ctx.stroke();
       }
-      for (let gy = 0; gy <= BUILD_GRID_ROWS; gy++) {
+      for (let gy = 0; gy <= bgRows; gy++) {
         ctx.beginPath();
         ctx.moveTo(origin.x * T, (origin.y + gy) * T);
-        ctx.lineTo((origin.x + BUILD_GRID_COLS) * T, (origin.y + gy) * T);
+        ctx.lineTo((origin.x + bgCols) * T, (origin.y + gy) * T);
         ctx.stroke();
       }
 
       ctx.strokeStyle = tc + '0.6)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(origin.x * T, origin.y * T, BUILD_GRID_COLS * T, BUILD_GRID_ROWS * T);
+      ctx.strokeRect(origin.x * T, origin.y * T, bgCols * T, bgRows * T);
 
       ctx.fillStyle = tc + '0.85)';
       ctx.font = 'bold 11px monospace';
       // Label position: below for bottom/left team, above for top/right team
       const teamIdx = state.mapDef.playerSlots[p]?.teamIndex ?? (p < 2 ? 0 : 1);
       const labelBelow = teamIdx === 0;
-      const ly = labelBelow ? (origin.y + BUILD_GRID_ROWS + 1.2) * T : (origin.y - 0.5) * T;
+      const ly = labelBelow ? (origin.y + bgRows + 1.2) * T : (origin.y - 0.5) * T;
       ctx.fillText(`P${p + 1} [${player.race}]`, origin.x * T, ly);
     }
   }
@@ -913,25 +915,33 @@ export class Renderer {
       const pc = PLAYER_COLORS[p % PLAYER_COLORS.length];
       const tc = hexToRgba(pc);
 
+      const hCols = state.mapDef.hutGridCols;
+      const hRows = state.mapDef.hutGridRows;
       ctx.fillStyle = tc + '0.15)';
-      ctx.fillRect(origin.x * T, origin.y * T, HUT_GRID_COLS * T, T);
+      ctx.fillRect(origin.x * T, origin.y * T, hCols * T, hRows * T);
       ctx.strokeStyle = tc + '0.4)';
       ctx.lineWidth = 1;
-      for (let gx = 0; gx <= HUT_GRID_COLS; gx++) {
+      for (let gx = 0; gx <= hCols; gx++) {
         ctx.beginPath();
         ctx.moveTo((origin.x + gx) * T, origin.y * T);
-        ctx.lineTo((origin.x + gx) * T, (origin.y + 1) * T);
+        ctx.lineTo((origin.x + gx) * T, (origin.y + hRows) * T);
+        ctx.stroke();
+      }
+      for (let gy = 0; gy <= hRows; gy++) {
+        ctx.beginPath();
+        ctx.moveTo(origin.x * T, (origin.y + gy) * T);
+        ctx.lineTo((origin.x + hCols) * T, (origin.y + gy) * T);
         ctx.stroke();
       }
       ctx.strokeStyle = tc + '0.6)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(origin.x * T, origin.y * T, HUT_GRID_COLS * T, T);
+      ctx.strokeRect(origin.x * T, origin.y * T, hCols * T, hRows * T);
 
       ctx.fillStyle = tc + '0.8)';
       ctx.font = 'bold 9px monospace';
       const teamIdx = state.mapDef.playerSlots[p]?.teamIndex ?? (p < 2 ? 0 : 1);
       const labelBelow = teamIdx === 0;
-      const ly = labelBelow ? (origin.y + 1.8) * T : (origin.y - 0.4) * T;
+      const ly = labelBelow ? (origin.y + hRows + 0.8) * T : (origin.y - 0.4) * T;
       ctx.fillText(`P${p + 1} HUTS`, origin.x * T, ly);
     }
   }

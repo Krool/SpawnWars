@@ -112,6 +112,11 @@ export const DUEL_MAP: MapDef = {
   diamondHalfW: DIAMOND_HALF_W,
   diamondHalfH: DIAMOND_HALF_H,
 
+  buildGridCols: BUILD_GRID_COLS,   // 14
+  buildGridRows: BUILD_GRID_ROWS,   // 3
+  hutGridCols: 10,
+  hutGridRows: 1,
+
   resourceNodes: [
     { type: ResourceType.Wood, x: WOOD_NODE_X, y: 60 },
     { type: ResourceType.Stone, x: STONE_NODE_X, y: 60 },
@@ -136,14 +141,16 @@ export const DUEL_MAP: MapDef = {
 // Skirmish constants
 const SK_W = 160;
 const SK_H = 90;
-const SK_BASE_DEPTH = 18;       // base zone depth (x-direction)
 const SK_PLAYER_STRIP_H = 26;   // each player's vertical strip height
 const SK_STRIP_GAP = 3;         // gap between player strips
 const SK_STRIP_START = 4;       // top margin before first strip
 
-// Base zone x-ranges
-const SK_LEFT_BASE_END = SK_BASE_DEPTH;           // 18
-const SK_RIGHT_BASE_START = SK_W - SK_BASE_DEPTH;  // 142
+// Build grid: 3 wide × 14 tall (rotated 90° from duel's 14×3)
+const SK_BUILD_COLS = 3;
+const SK_BUILD_ROWS = 14;
+// Hut grid: 1 wide × 10 tall (rotated 90° from duel's 10×1)
+const SK_HUT_COLS = 1;
+const SK_HUT_ROWS = 10;
 
 // Player strip Y positions (3 strips stacked vertically)
 function skPlayerStripY(slotInTeam: number): number {
@@ -151,116 +158,110 @@ function skPlayerStripY(slotInTeam: number): number {
 }
 
 // Shape: peanut rotated 90° — wide at bases, narrow necks, widest at diamond center
-// Shape varies along X axis (columns), returns Y margin (void tiles top/bottom)
-const SK_NECK_X_LEFT = 45;     // left neck narrowest column
-const SK_NECK_X_RIGHT = 115;   // right neck narrowest column
-const SK_DIAMOND_X = 80;       // diamond center x
-const SK_DIAMOND_Y = 45;       // diamond center y
-const SK_SHAPE_BASE_H = 82;    // playable height at base zones
-const SK_SHAPE_NECK_H = 50;    // playable height at necks
-const SK_SHAPE_CENTER_H = 86;  // playable height at diamond center
+const SK_NECK_X_LEFT = 45;
+const SK_NECK_X_RIGHT = 115;
+const SK_DIAMOND_X = 80;
+const SK_DIAMOND_Y = 45;
+const SK_SHAPE_BASE_H = 82;
+const SK_SHAPE_NECK_H = 50;
+const SK_SHAPE_CENTER_H = 86;
 
 function skGetMarginAtCol(x: number): number {
-  // Left base zone
-  if (x <= SK_LEFT_BASE_END) return (SK_H - SK_SHAPE_BASE_H) / 2;
-  // Right base zone
-  if (x >= SK_RIGHT_BASE_START) return (SK_H - SK_SHAPE_BASE_H) / 2;
-  // Left base → left neck
+  if (x <= 18) return (SK_H - SK_SHAPE_BASE_H) / 2;
+  if (x >= 142) return (SK_H - SK_SHAPE_BASE_H) / 2;
   if (x <= SK_NECK_X_LEFT) {
-    const t = (x - SK_LEFT_BASE_END) / (SK_NECK_X_LEFT - SK_LEFT_BASE_END);
-    const h = SK_SHAPE_BASE_H + (SK_SHAPE_NECK_H - SK_SHAPE_BASE_H) * t;
-    return (SK_H - h) / 2;
+    const t = (x - 18) / (SK_NECK_X_LEFT - 18);
+    return (SK_H - (SK_SHAPE_BASE_H + (SK_SHAPE_NECK_H - SK_SHAPE_BASE_H) * t)) / 2;
   }
-  // Left neck → center
   if (x <= SK_DIAMOND_X) {
     const t = (x - SK_NECK_X_LEFT) / (SK_DIAMOND_X - SK_NECK_X_LEFT);
-    const h = SK_SHAPE_NECK_H + (SK_SHAPE_CENTER_H - SK_SHAPE_NECK_H) * t;
-    return (SK_H - h) / 2;
+    return (SK_H - (SK_SHAPE_NECK_H + (SK_SHAPE_CENTER_H - SK_SHAPE_NECK_H) * t)) / 2;
   }
-  // Center → right neck
   if (x <= SK_NECK_X_RIGHT) {
     const t = (x - SK_DIAMOND_X) / (SK_NECK_X_RIGHT - SK_DIAMOND_X);
-    const h = SK_SHAPE_CENTER_H + (SK_SHAPE_NECK_H - SK_SHAPE_CENTER_H) * t;
-    return (SK_H - h) / 2;
+    return (SK_H - (SK_SHAPE_CENTER_H + (SK_SHAPE_NECK_H - SK_SHAPE_CENTER_H) * t)) / 2;
   }
-  // Right neck → right base
-  const t = (x - SK_NECK_X_RIGHT) / (SK_RIGHT_BASE_START - SK_NECK_X_RIGHT);
-  const h = SK_SHAPE_NECK_H + (SK_SHAPE_BASE_H - SK_SHAPE_NECK_H) * t;
-  return (SK_H - h) / 2;
+  const t = (x - SK_NECK_X_RIGHT) / (142 - SK_NECK_X_RIGHT);
+  return (SK_H - (SK_SHAPE_NECK_H + (SK_SHAPE_BASE_H - SK_SHAPE_NECK_H) * t)) / 2;
 }
 
-// Lane Y positions: top lane in gap between strips 0-1, bottom lane in gap between strips 1-2
-const SK_TOP_LANE_Y = skPlayerStripY(0) + SK_PLAYER_STRIP_H + Math.floor(SK_STRIP_GAP / 2); // 4+26+1 = 31
-const SK_BOT_LANE_Y = skPlayerStripY(1) + SK_PLAYER_STRIP_H + Math.floor(SK_STRIP_GAP / 2); // 33+26+1 = 60
+// ---- Skirmish base layout ----
+// Left side (Team 0):
+//   x=0..4: build grids (3 wide), one per player strip
+//   x=5:    hut columns (1 wide), one per player strip
+//   x=10..29: tower alley (20×12), centered vertically
+//   HQ inside tower alley, centered at y=45
+// Right side (Team 1): mirrored
 
-// Build grid origins for skirmish (each player gets 14×3 build area)
+// Build grid origins: 3 wide × 14 tall, left-aligned in each strip
 function skBuildGridOrigin(side: 'left' | 'right', slotInTeam: number): Vec2 {
   const stripY = skPlayerStripY(slotInTeam);
-  const x = side === 'left'
-    ? 2  // left side: near left edge
-    : SK_RIGHT_BASE_START + 2;  // right side: near right edge
-  const y = stripY + Math.floor((SK_PLAYER_STRIP_H - BUILD_GRID_ROWS) / 2);
+  const y = stripY + Math.floor((SK_PLAYER_STRIP_H - SK_BUILD_ROWS) / 2);
+  const x = side === 'left' ? 2 : SK_W - 2 - SK_BUILD_COLS; // 2 or 155
   return { x, y };
 }
 
+// Hut grid origins: 1 wide × 10 tall, next to builds
 function skHutGridOrigin(side: 'left' | 'right', slotInTeam: number): Vec2 {
   const stripY = skPlayerStripY(slotInTeam);
-  const x = side === 'left'
-    ? SK_LEFT_BASE_END - 2  // left side: inner edge of base
-    : SK_RIGHT_BASE_START;  // right side: inner edge of base
-  const y = stripY + Math.floor((SK_PLAYER_STRIP_H - 1) / 2);  // centered vertically
+  const y = stripY + Math.floor((SK_PLAYER_STRIP_H - SK_HUT_ROWS) / 2);
+  const x = side === 'left' ? 6 : SK_W - 6 - SK_HUT_COLS; // 6 or 153
   return { x, y };
 }
 
-// Horizontal lane paths for skirmish — lanes run left-to-right (Team 0 perspective)
-function skLanePathLR(laneY: number, forkDir: 'top' | 'bottom'): Vec2[] {
-  const startX = 10;               // left base edge
-  const endX = SK_W - 10;          // right base edge
-  const diamondForkY = forkDir === 'top'
-    ? SK_DIAMOND_Y - 18  // fork above diamond
-    : SK_DIAMOND_Y + 18; // fork below diamond
+// HQ + tower alley positions
+const SK_HQ_Y = Math.floor(SK_H / 2) - Math.floor(HQ_HEIGHT / 2); // 43
+const SK_ALLEY_Y = Math.floor(SK_H / 2) - Math.floor(SHARED_ALLEY_ROWS / 2); // 39
+
+// Lane Y positions (in gaps between strips)
+const SK_TOP_LANE_Y = skPlayerStripY(0) + SK_PLAYER_STRIP_H + Math.floor(SK_STRIP_GAP / 2); // 31
+const SK_BOT_LANE_Y = skPlayerStripY(1) + SK_PLAYER_STRIP_H + Math.floor(SK_STRIP_GAP / 2); // 60
+
+// Lane paths converge at HQ on each side, fan out through the map, fork around diamond
+// Left HQ center: ~(14, 44), Right HQ center: ~(146, 44)
+const SK_LEFT_HQ_CX = 14;
+const SK_RIGHT_HQ_CX = SK_W - 14;
+
+function skLanePath(forkDir: 'top' | 'bottom'): Vec2[] {
+  const laneY = forkDir === 'top' ? SK_TOP_LANE_Y : SK_BOT_LANE_Y;
+  const forkY = forkDir === 'top' ? SK_DIAMOND_Y - 18 : SK_DIAMOND_Y + 18;
   return [
-    { x: startX, y: laneY },      // left base
-    { x: startX + 20, y: laneY }, // through left territory
-    { x: startX + 35, y: laneY }, // convergence before diamond
-    { x: SK_DIAMOND_X - 15, y: diamondForkY }, // fork around diamond
-    { x: SK_DIAMOND_X, y: diamondForkY },       // alongside diamond
-    { x: SK_DIAMOND_X + 15, y: diamondForkY },  // past diamond
-    { x: endX - 35, y: laneY },   // reconvergence
-    { x: endX - 20, y: laneY },   // through right territory
-    { x: endX, y: laneY },        // right base
+    { x: SK_LEFT_HQ_CX, y: SK_DIAMOND_Y },         // converge at left HQ
+    { x: SK_LEFT_HQ_CX + 8, y: forkDir === 'top' ? 38 : 52 }, // fan out
+    { x: 35, y: laneY },                             // reach lane Y
+    { x: 50, y: laneY },                             // cruise
+    { x: SK_DIAMOND_X - 15, y: forkY },              // fork around diamond
+    { x: SK_DIAMOND_X, y: forkY },                   // alongside diamond
+    { x: SK_DIAMOND_X + 15, y: forkY },              // past diamond
+    { x: 110, y: laneY },                            // cruise
+    { x: 125, y: laneY },                            // reach lane Y
+    { x: SK_RIGHT_HQ_CX - 8, y: forkDir === 'top' ? 38 : 52 }, // converge
+    { x: SK_RIGHT_HQ_CX, y: SK_DIAMOND_Y },         // converge at right HQ
   ];
 }
 
-// Team 0 paths (left→right), Team 1 gets these reversed
-const SK_LANE_TOP_LR = skLanePathLR(SK_TOP_LANE_Y, 'top');
-const SK_LANE_BOT_LR = skLanePathLR(SK_BOT_LANE_Y, 'bottom');
+const SK_LANE_TOP = skLanePath('top');
+const SK_LANE_BOT = skLanePath('bottom');
 
 export const SKIRMISH_MAP: MapDef = {
   id: 'skirmish',
   name: 'Skirmish',
-  width: SK_W,      // 160
-  height: SK_H,     // 90
+  width: SK_W,
+  height: SK_H,
   maxPlayers: 6,
   playersPerTeam: 3,
   shapeAxis: 'x',
 
   teams: [
-    // Team 0 (Left)
+    // Team 0 (Left) — HQ inside tower alley, near left edge
     {
-      hqPosition: {
-        x: 1,
-        y: Math.floor(SK_H / 2) - Math.floor(HQ_HEIGHT / 2),  // centered vertically
-      },
-      towerAlleyOrigin: { x: SK_LEFT_BASE_END + 4, y: Math.floor(SK_H / 2) - Math.floor(SHARED_ALLEY_ROWS / 2) },
+      hqPosition: { x: SK_LEFT_HQ_CX - Math.floor(HQ_WIDTH / 2), y: SK_HQ_Y },
+      towerAlleyOrigin: { x: 10, y: SK_ALLEY_Y },
     },
-    // Team 1 (Right)
+    // Team 1 (Right) — mirrored
     {
-      hqPosition: {
-        x: SK_W - HQ_WIDTH - 1,
-        y: Math.floor(SK_H / 2) - Math.floor(HQ_HEIGHT / 2),
-      },
-      towerAlleyOrigin: { x: SK_RIGHT_BASE_START - SHARED_ALLEY_COLS - 4, y: Math.floor(SK_H / 2) - Math.floor(SHARED_ALLEY_ROWS / 2) },
+      hqPosition: { x: SK_RIGHT_HQ_CX - Math.floor(HQ_WIDTH / 2), y: SK_HQ_Y },
+      towerAlleyOrigin: { x: SK_W - 10 - SHARED_ALLEY_COLS, y: SK_ALLEY_Y },
     },
   ],
 
@@ -276,19 +277,24 @@ export const SKIRMISH_MAP: MapDef = {
   ],
 
   lanePaths: [
-    // Team 0 (Left→Right) paths
-    { left: [...SK_LANE_TOP_LR], right: [...SK_LANE_BOT_LR] },
-    // Team 1 (Right→Left) paths — same waypoints, reversed order
-    { left: [...SK_LANE_TOP_LR].reverse(), right: [...SK_LANE_BOT_LR].reverse() },
+    // Team 0 (Left→Right): first waypoint near own HQ, last near enemy HQ
+    { left: [...SK_LANE_TOP], right: [...SK_LANE_BOT] },
+    // Team 1 (Right→Left): reversed
+    { left: [...SK_LANE_TOP].reverse(), right: [...SK_LANE_BOT].reverse() },
   ],
 
   diamondCenter: { x: SK_DIAMOND_X, y: SK_DIAMOND_Y },
   diamondHalfW: 12,
   diamondHalfH: 14,
 
+  buildGridCols: SK_BUILD_COLS,   // 3
+  buildGridRows: SK_BUILD_ROWS,   // 14
+  hutGridCols: SK_HUT_COLS,       // 1
+  hutGridRows: SK_HUT_ROWS,       // 10
+
   resourceNodes: [
-    { type: ResourceType.Wood, x: SK_DIAMOND_X, y: 6 },     // top of map
-    { type: ResourceType.Stone, x: SK_DIAMOND_X, y: SK_H - 6 }, // bottom of map
+    { type: ResourceType.Wood, x: SK_DIAMOND_X, y: 6 },
+    { type: ResourceType.Stone, x: SK_DIAMOND_X, y: SK_H - 6 },
   ],
 
   isPlayable(x: number, y: number): boolean {

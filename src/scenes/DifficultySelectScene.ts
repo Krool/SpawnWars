@@ -122,7 +122,6 @@ export class DifficultySelectScene implements Scene {
       const idx = this.getCardIndexAt(cx, cy);
       if (idx >= 0) {
         this.selectedIndex = idx;
-        this.onConfirm(DIFFICULTIES[idx].level, ALL_MAPS[this.mapIndex]);
         return;
       }
       if (this.isStartButtonAt(cx, cy)) {
@@ -147,7 +146,6 @@ export class DifficultySelectScene implements Scene {
       const idx = this.getCardIndexAt(cx, cy);
       if (idx >= 0) {
         this.selectedIndex = idx;
-        this.onConfirm(DIFFICULTIES[idx].level, ALL_MAPS[this.mapIndex]);
         return;
       }
       if (this.isStartButtonAt(cx, cy)) {
@@ -284,7 +282,7 @@ export class DifficultySelectScene implements Scene {
     // Hint
     ctx.font = `${hintSize}px monospace`;
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.fillText('Up/Down + Enter  |  Click to select', w / 2, mt.y + mt.h + 22);
+    ctx.fillText('Up/Down to select  |  Enter or START to play', w / 2, mt.y + mt.h + 22);
 
     // Difficulty cards
     const cards = this.getCardLayout();

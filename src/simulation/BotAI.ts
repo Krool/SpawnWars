@@ -1,6 +1,6 @@
 import {
   GameState, GameCommand, Race, BuildingType, Lane, Team, HQ_WIDTH, HQ_HEIGHT,
-  BUILD_GRID_COLS, BUILD_GRID_ROWS, HarvesterAssignment, HQ_HP,
+  HarvesterAssignment, HQ_HP,
   SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS,
 } from './types';
 import { RACE_BUILDING_COSTS, RACE_UPGRADE_COSTS, UPGRADE_TREES, UpgradeNodeDef, UNIT_STATS } from './data';
@@ -77,11 +77,11 @@ export const BOT_DIFFICULTY_PRESETS: Record<BotDifficultyLevel, BotDifficulty> =
     maxSpawners: 5,           // moderate cap: 5 spawners
     maxHuts: 4,               // moderate cap: 4 huts
   },
-  // Hard: moderate caps, fast builds, no upgrades, nukes
+  // Hard: moderate caps, fast builds, upgrades after 4 spawners, nukes
   [BotDifficultyLevel.Hard]: {
     buildSpeed: 25,           // 1.25 seconds between builds
-    upgradeSpeed: 999999,     // no upgrades — pure army advantage
-    upgradeThreshold: 99,
+    upgradeSpeed: 50,         // upgrades every 2.5 seconds
+    upgradeThreshold: 4,      // start upgrading after 4 spawners
     nukeMinTime: 2.0,
     laneIQ: 'threat',
     counterBuild: false,
@@ -93,11 +93,11 @@ export const BOT_DIFFICULTY_PRESETS: Record<BotDifficultyLevel, BotDifficulty> =
     maxSpawners: 6,           // high cap: 6 spawners
     maxHuts: 5,               // high cap: 5 huts
   },
-  // Nightmare: unlimited, fastest builds, massive economy, no upgrades
+  // Nightmare: unlimited, fastest builds, upgrades after 5 spawners
   [BotDifficultyLevel.Nightmare]: {
     buildSpeed: 10,           // 0.5 seconds between builds — relentless
-    upgradeSpeed: 999999,     // no upgrades — pure army mass
-    upgradeThreshold: 99,
+    upgradeSpeed: 30,         // upgrades every 1.5 seconds
+    upgradeThreshold: 5,      // start upgrading after 5 spawners
     nukeMinTime: 1.0,
     laneIQ: 'threat',
     counterBuild: false,
@@ -1529,7 +1529,7 @@ function botDoBuildOrder(
   if (hutCount < profile.maxHuts && tryHut()) return true;
 
   const totalMilitary = meleeCount + rangedCount + casterCount + towerCount;
-  if (totalMilitary < BUILD_GRID_COLS * BUILD_GRID_ROWS) {
+  if (totalMilitary < state.mapDef.buildGridCols * state.mapDef.buildGridRows) {
     const lateCasterTarget = 2 + extraCasters;
     if (casterCount < lateCasterTarget && tryBuild(BuildingType.CasterSpawner)) return true;
 
@@ -1572,8 +1572,8 @@ function botPlaceBuilding(
     myBuildings.filter(b => b.buildGrid === 'military').map(b => `${b.gridX},${b.gridY}`)
   );
   const freeSlots: { gx: number; gy: number }[] = [];
-  for (let gy = 0; gy < BUILD_GRID_ROWS; gy++) {
-    for (let gx = 0; gx < BUILD_GRID_COLS; gx++) {
+  for (let gy = 0; gy < state.mapDef.buildGridRows; gy++) {
+    for (let gx = 0; gx < state.mapDef.buildGridCols; gx++) {
       if (!occupied.has(`${gx},${gy}`)) freeSlots.push({ gx, gy });
     }
   }
@@ -1582,7 +1582,7 @@ function botPlaceBuilding(
   let slot: { gx: number; gy: number };
   if (type === BuildingType.Tower) {
     // Towers in center for coverage
-    const centerX = Math.floor(BUILD_GRID_COLS / 2);
+    const centerX = Math.floor(state.mapDef.buildGridCols / 2);
     freeSlots.sort((a, b) => Math.abs(a.gx - centerX) - Math.abs(b.gx - centerX) || a.gy - b.gy);
     slot = freeSlots[0];
   } else {

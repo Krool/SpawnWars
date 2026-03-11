@@ -186,6 +186,12 @@ export interface MapDef {
   diamondHalfW: number;
   diamondHalfH: number;
   resourceNodes: { type: ResourceType; x: number; y: number }[];
+  /** Per-player military build grid dimensions (cols × rows) */
+  buildGridCols: number;       // 14 for duel (horizontal), 3 for skirmish (rotated)
+  buildGridRows: number;       // 3 for duel, 14 for skirmish (rotated)
+  /** Per-player harvester hut grid dimensions */
+  hutGridCols: number;         // 10 for duel (horizontal), 1 for skirmish (rotated)
+  hutGridRows: number;         // 1 for duel, 10 for skirmish (rotated)
   /** Returns true if tile (x, y) is within the playable map boundary */
   isPlayable(x: number, y: number): boolean;
   /** Returns the playable x-range for a given row (portrait) or y-range for a given col (landscape) */

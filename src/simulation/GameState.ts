@@ -1,7 +1,7 @@
 import {
   GameState, PlayerState, DiamondState, Team, Race, Lane, MapDef, createPlayerStats,
   MAP_WIDTH, MAP_HEIGHT, HQ_HP, HQ_WIDTH, HQ_HEIGHT,
-  BUILD_GRID_COLS, BUILD_GRID_ROWS, HUT_GRID_COLS, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS, ZONES, TICK_RATE,
+  BUILD_GRID_COLS, BUILD_GRID_ROWS, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS, ZONES, TICK_RATE,
   DIAMOND_CENTER_X, DIAMOND_CENTER_Y, DIAMOND_HALF_W, DIAMOND_HALF_H,
   WOOD_NODE_X, STONE_NODE_X,
   GOLD_PER_CELL, GoldCell, CROSS_BASE_MARGIN, CROSS_BASE_WIDTH,
@@ -78,11 +78,12 @@ function getUpgradeCost(path: string[], race: Race): { gold: number; wood: numbe
 
 export interface UpgradeResult {
   hp: number; damage: number; attackSpeed: number; moveSpeed: number; range: number;
+  spawnSpeed: number;  // <1 = faster spawns
   special: import('./data').UpgradeSpecial;
 }
 
 export function getUnitUpgradeMultipliers(path: string[], race?: Race, buildingType?: BuildingType): UpgradeResult {
-  let hp = 1, damage = 1, attackSpeed = 1, moveSpeed = 1, range = 1;
+  let hp = 1, damage = 1, attackSpeed = 1, moveSpeed = 1, range = 1, spawnSpeed = 1;
   const special: import('./data').UpgradeSpecial = {};
 
   const tree = race && buildingType ? UPGRADE_TREES[race]?.[buildingType] : undefined;
@@ -96,6 +97,7 @@ export function getUnitUpgradeMultipliers(path: string[], race?: Race, buildingT
       if (def.attackSpeedMult) attackSpeed *= def.attackSpeedMult;
       if (def.moveSpeedMult) moveSpeed *= def.moveSpeedMult;
       if (def.rangeMult) range *= def.rangeMult;
+      if (def.spawnSpeedMult) spawnSpeed *= def.spawnSpeedMult;
       if (def.special) {
         // Merge specials (later nodes override/stack)
         for (const [k, v] of Object.entries(def.special)) {
@@ -114,7 +116,7 @@ export function getUnitUpgradeMultipliers(path: string[], race?: Race, buildingT
       }
     }
   }
-  return { hp, damage, attackSpeed, moveSpeed, range, special };
+  return { hp, damage, attackSpeed, moveSpeed, range, spawnSpeed, special };
 }
 
 function addSound(state: GameState, type: SoundEvent['type'], x?: number, y?: number): void {
@@ -312,12 +314,15 @@ export function createInitialState(
   for (let i = 0; i < playerStates.length; i++) {
     const p = playerStates[i];
     const origin = getHutGridOrigin(i, map);
-    const gx = 4; // center slot
-    const world = { x: origin.x + gx, y: origin.y };
+    const totalSlots = map.hutGridCols * map.hutGridRows;
+    const centerSlot = Math.floor(totalSlots / 2);
+    const slotGx = centerSlot % map.hutGridCols;
+    const slotGy = Math.floor(centerSlot / map.hutGridCols);
+    const world = { x: origin.x + slotGx, y: origin.y + slotGy };
     const hutHp = getBuildingCost(p.race, BuildingType.HarvesterHut).hp;
     const building: BuildingState = {
       id: genId(state), type: BuildingType.HarvesterHut, playerId: i, buildGrid: 'hut',
-      gridX: gx, gridY: 0, worldX: world.x, worldY: world.y,
+      gridX: centerSlot, gridY: 0, worldX: world.x, worldY: world.y,
       lane: Lane.Left, hp: hutHp, maxHp: hutHp, actionTimer: 0, placedTick: 0, upgradePath: [],
     };
     state.buildings.push(building);
@@ -687,7 +692,7 @@ function placeBuilding(state: GameState, cmd: Extract<GameCommand, { type: 'plac
     if (isFirstTower) player.hasBuiltTower = true;
   } else {
     // Military grid
-    if (cmd.gridX < 0 || cmd.gridX >= BUILD_GRID_COLS || cmd.gridY < 0 || cmd.gridY >= BUILD_GRID_ROWS) return;
+    if (cmd.gridX < 0 || cmd.gridX >= state.mapDef.buildGridCols || cmd.gridY < 0 || cmd.gridY >= state.mapDef.buildGridRows) return;
     if (state.buildings.some(b => b.buildGrid === 'military' && b.playerId === cmd.playerId && b.gridX === cmd.gridX && b.gridY === cmd.gridY)) return;
     if (!isFirstTower) { player.gold -= cost.gold; player.wood -= cost.wood; player.stone -= cost.stone; }
     const world = gridSlotToWorld(cmd.playerId, cmd.gridX, cmd.gridY, state.mapDef);
@@ -742,7 +747,7 @@ function toggleAllLanes(state: GameState, cmd: Extract<GameCommand, { type: 'tog
 function buildHut(state: GameState, cmd: Extract<GameCommand, { type: 'build_hut' }>): void {
   const player = state.players[cmd.playerId];
   const myHuts = state.buildings.filter(b => b.playerId === cmd.playerId && b.type === BuildingType.HarvesterHut);
-  if (myHuts.length >= HUT_GRID_COLS) return;
+  if (myHuts.length >= state.mapDef.hutGridCols * state.mapDef.hutGridRows) return;
   const hutRes = getBuildingCost(player.race, BuildingType.HarvesterHut);
   const mult = Math.pow(1.35, Math.max(0, myHuts.length - 1));
   const goldCost = Math.floor(hutRes.gold * mult);
@@ -754,15 +759,24 @@ function buildHut(state: GameState, cmd: Extract<GameCommand, { type: 'build_hut
   player.stone -= stoneCost;
 
   const origin = getHutGridOrigin(cmd.playerId, state.mapDef);
+  const hCols = state.mapDef.hutGridCols;
+  const totalSlots = hCols * state.mapDef.hutGridRows;
   const occupiedHuts = new Set(myHuts.map(b => b.gridX));
-  // Fill from center outward
-  const CENTER_OUT = [4, 5, 3, 6, 2, 7, 1, 8, 0, 9];
-  for (const gx of CENTER_OUT) {
-    if (!occupiedHuts.has(gx)) {
-      const world = { x: origin.x + gx, y: origin.y };
+  // Fill from center outward (slot is linear index across cols then rows)
+  const CENTER_OUT: number[] = [];
+  for (let d = 0; d <= Math.floor(totalSlots / 2); d++) {
+    const mid = Math.floor(totalSlots / 2);
+    if (mid + d < totalSlots) CENTER_OUT.push(mid + d);
+    if (d > 0 && mid - d >= 0) CENTER_OUT.push(mid - d);
+  }
+  for (const slot of CENTER_OUT) {
+    if (!occupiedHuts.has(slot)) {
+      const gx = slot % hCols;
+      const gy = Math.floor(slot / hCols);
+      const world = { x: origin.x + gx, y: origin.y + gy };
       const building: BuildingState = {
         id: genId(state), type: BuildingType.HarvesterHut, playerId: cmd.playerId, buildGrid: 'hut',
-        gridX: gx, gridY: 0, worldX: world.x, worldY: world.y,
+        gridX: slot, gridY: 0, worldX: world.x, worldY: world.y,
         lane: Lane.Left, hp: getBuildingCost(player.race, BuildingType.HarvesterHut).hp, maxHp: getBuildingCost(player.race, BuildingType.HarvesterHut).hp, actionTimer: 0, placedTick: state.tick, upgradePath: [],
       };
       state.buildings.push(building);
@@ -869,11 +883,11 @@ function tickSpawners(state: GameState): void {
     if (building.type === BuildingType.Tower || building.type === BuildingType.HarvesterHut) continue;
     building.actionTimer--;
     if (building.actionTimer <= 0) {
-      building.actionTimer = SPAWN_INTERVAL_TICKS;
       const player = state.players[building.playerId];
       const stats = UNIT_STATS[player.race]?.[building.type];
       if (!stats) continue;
       const upgrade = getUnitUpgradeMultipliers(building.upgradePath, player.race, building.type);
+      building.actionTimer = Math.round(SPAWN_INTERVAL_TICKS * upgrade.spawnSpeed);
       const category: UnitState['category'] =
         building.type === BuildingType.CasterSpawner ? 'caster' :
         building.type === BuildingType.RangedSpawner ? 'ranged' : 'melee';
@@ -1533,8 +1547,9 @@ function moveWithSlide(pos: { x: number; y: number }, tx: number, ty: number, st
 
 function tickUnitCollision(state: GameState): void {
   for (const unit of state.units) {
-    // Unit-vs-building blocking
+    // Unit-vs-building blocking (skip spawners — units spawn on them)
     for (const building of state.buildings) {
+      if (building.type === BuildingType.MeleeSpawner || building.type === BuildingType.RangedSpawner || building.type === BuildingType.CasterSpawner || building.type === BuildingType.HarvesterHut) continue;
       pushOutFromPoint(unit, building.worldX + 0.5, building.worldY + 0.5, COLLISION_BUILDING_RADIUS);
     }
 
@@ -1582,7 +1597,7 @@ function tickCombat(state: GameState): void {
         const dx = target.x - unit.x;
         const dy = target.y - unit.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > unit.range && dist > 0.001) {
+        if (dist > unit.range + 0.15 && dist > 0.001) {
           const movePerTick = getEffectiveSpeed(unit) / TICK_RATE;
           const step = Math.min(movePerTick, dist - unit.range);
           moveWithSlide(unit, target.x, target.y, step, state.diamondCells, state.mapDef);
@@ -1591,12 +1606,13 @@ function tickCombat(state: GameState): void {
       }
     }
 
-    // Attack
+    // Attack — tolerance of 0.15 tiles so units that are clamped/blocked
+    // just outside nominal range can still attack (prevents whiff bug).
     if (unit.targetId !== null && unit.attackTimer <= 0) {
       const target = unitById.get(unit.targetId);
       if (target) {
         const targetDist = Math.sqrt((target.x - unit.x) ** 2 + (target.y - unit.y) ** 2);
-        if (targetDist > unit.range) {
+        if (targetDist > unit.range + 0.15) {
           // Not in attack range yet (still chasing).
           if (unit.attackTimer > 0) unit.attackTimer--;
           continue;
