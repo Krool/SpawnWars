@@ -22,6 +22,41 @@ import {
 const T = TILE_SIZE;
 const LANE_LEFT_COLOR = '#4fc3f7';
 const LANE_RIGHT_COLOR = '#ff8a65';
+const DEAD_UNIT_LIFETIME_SEC = 0.45;
+
+type UnitCategory = 'melee' | 'ranged' | 'caster';
+
+interface DeadUnitSnapshot {
+  id: number;
+  x: number;
+  y: number;
+  team: Team;
+  playerId: number;
+  race?: Race;
+  category: UnitCategory;
+  upgradeNode?: string;
+  upgradeTier: number;
+  lane: Lane;
+  faceLeft: boolean;
+  wasAttacking: boolean;
+  frame: number;
+  ageSec: number;
+}
+
+interface UnitRenderSnapshot {
+  x: number;
+  y: number;
+  team: Team;
+  playerId: number;
+  race?: Race;
+  category: UnitCategory;
+  upgradeNode?: string;
+  upgradeTier: number;
+  lane: Lane;
+  faceLeft: boolean;
+  wasAttacking: boolean;
+  frame: number;
+}
 
 /** Convert a #rrggbb hex color to an `rgba(r,g,b,` prefix string for use as `hexToRgba(c) + '0.5)'` */
 function hexToRgba(hex: string): string {
@@ -62,9 +97,11 @@ export class Renderer {
   private facing = new Map<number, boolean>(); // true = face left
   // Death effects: client-side animated sprites at death locations
   private deathEffects: { x: number; y: number; frame: number; maxFrames: number; size: number; type: 'dust' | 'explosion' | 'race_burst'; race?: Race }[] = [];
+  private deadUnits: DeadUnitSnapshot[] = [];
   // Track unit/building IDs from last frame to detect removals
   private lastUnitIds = new Set<number>();
   private lastUnitPositions = new Map<number, { x: number; y: number; team: number; race?: Race }>();
+  private lastUnitRenders = new Map<number, UnitRenderSnapshot>();
   private lastBuildingIds = new Set<number>();
   private lastBuildingPositions = new Map<number, { x: number; y: number; hpPct: number }>();
 
@@ -150,6 +187,7 @@ export class Renderer {
     this.screenShake.update(dt);
     this.weather.update(dt, elapsedSec, this.dayNight.phase);
     this.projectileTrails.update(dt);
+    this.updateDeadUnits(dt);
     if (state.tick !== this.lastConsumedTick) {
       this.combatVfx.consume(state.combatEvents);
       this.lastConsumedTick = state.tick;
@@ -767,36 +805,122 @@ export class Renderer {
       ctx.textAlign = 'start';
     };
 
-    // Wood node — forest cluster of multiple trees
+    const drawWoodPile = (x: number, y: number, amount: number) => {
+      const px = x * T;
+      const py = y * T;
+      const size = Math.min(1.15, 0.58 + amount * 0.08) * T;
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
+      ctx.beginPath();
+      ctx.ellipse(px, py + size * 0.22, size * 0.55, size * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      const logs = Math.max(2, Math.min(4, Math.ceil(amount / 3)));
+      for (let i = 0; i < logs; i++) {
+        const row = i % 2;
+        const lx = px + (i - (logs - 1) / 2) * (size * 0.24) + (row === 1 ? size * 0.1 : 0);
+        const ly = py - row * size * 0.12 - Math.floor(i / 2) * size * 0.06;
+        ctx.fillStyle = row === 0 ? '#8d5a35' : '#a56a3f';
+        ctx.fillRect(lx - size * 0.16, ly - size * 0.08, size * 0.32, size * 0.16);
+        ctx.fillStyle = '#d7b083';
+        ctx.beginPath();
+        ctx.arc(lx - size * 0.16, ly, size * 0.08, 0, Math.PI * 2);
+        ctx.arc(lx + size * 0.16, ly, size * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+
+    // Wood node — larger stitched forest cluster with visible chopped wood piles.
     const woodNode = state.mapDef.resourceNodes.find(n => n.type === ResourceType.Wood);
     const stoneNode = state.mapDef.resourceNodes.find(n => n.type === ResourceType.Stone);
     const tree1Data = this.sprites.getResourceSprite('tree');
     const tree2Data = this.sprites.getResourceSprite('tree2');
     const tree3Data = this.sprites.getResourceSprite('tree3');
     if (tree1Data && woodNode) {
-      const cx = woodNode.x * T, cy = woodNode.y * T;
+      const cx = woodNode.x * T;
+      const cy = woodNode.y * T;
       const now = Date.now() / 1000;
+      const forestSeed = Math.floor(woodNode.x * 97 + woodNode.y * 131 + state.mapDef.width * 17);
+      const rand = seededRand(forestSeed);
+      const sprites = [tree1Data, tree2Data ?? tree1Data, tree3Data ?? tree1Data];
+      const anchors = [
+        { ox: -5.8, oy: -2.0, size: 2.15, sprite: 1 },
+        { ox: -3.9, oy: -2.5, size: 2.25, sprite: 2 },
+        { ox: -1.7, oy: -2.7, size: 2.45, sprite: 0 },
+        { ox: 0.5, oy: -2.5, size: 2.5, sprite: 1 },
+        { ox: 2.8, oy: -2.3, size: 2.3, sprite: 2 },
+        { ox: 5.1, oy: -1.8, size: 2.15, sprite: 0 },
+        { ox: -6.2, oy: 0.4, size: 2.45, sprite: 2 },
+        { ox: -3.7, oy: 0.1, size: 2.75, sprite: 0 },
+        { ox: -1.0, oy: -0.1, size: 2.95, sprite: 1 },
+        { ox: 1.8, oy: 0.0, size: 3.05, sprite: 0 },
+        { ox: 4.5, oy: 0.3, size: 2.8, sprite: 2 },
+        { ox: 6.8, oy: 0.7, size: 2.35, sprite: 1 },
+        { ox: -4.7, oy: 2.3, size: 2.25, sprite: 1 },
+        { ox: -1.9, oy: 2.5, size: 2.4, sprite: 2 },
+        { ox: 1.0, oy: 2.6, size: 2.35, sprite: 1 },
+        { ox: 4.0, oy: 2.3, size: 2.15, sprite: 0 },
+      ].map(anchor => ({
+        ...anchor,
+        ox: anchor.ox + (rand() - 0.5) * 0.55,
+        oy: anchor.oy + (rand() - 0.5) * 0.4,
+      }));
       const drawTree = (data: [HTMLImageElement, { frameW: number; frameH: number; cols: number; url: string }], x: number, y: number, size: number, phase: number) => {
         const [img, def] = data;
-        // Gentle procedural sway: rotate around trunk base
-        const angle = Math.sin(now * 1.2 + phase) * 0.03;
+        const angle = Math.sin(now * 1.15 + phase) * 0.032;
         ctx.save();
-        ctx.translate(x, y);        // trunk base position
+        ctx.translate(x, y);
         ctx.rotate(angle);
-        drawSpriteFrame(ctx, img, def, 0, -size / 2, -size * 0.8, size, size);
+        drawSpriteFrame(ctx, img, def, 0, -size / 2, -size * 0.84, size, size);
         ctx.restore();
       };
-      // Back row (smaller, behind)
-      const s1 = T * 2;
-      if (tree2Data) drawTree(tree2Data, cx - T * 2, cy - T * 0.5, s1, 0);
-      if (tree3Data) drawTree(tree3Data, cx + T * 2.5, cy - T * 0.5, s1, 2.1);
-      // Front row (larger, in front)
-      const s2 = T * 3;
-      drawTree(tree1Data, cx, cy, s2, 0.7);
-      if (tree2Data) drawTree(tree2Data, cx - T * 3, cy + T, s2 * 0.8, 1.4);
-      if (tree3Data) drawTree(tree3Data, cx + T * 3, cy + T, s2 * 0.8, 3.5);
+
+      ctx.fillStyle = 'rgba(42, 88, 48, 0.18)';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + T * 0.5, T * 6.8, T * 2.9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(81, 122, 63, 0.2)';
+      ctx.beginPath();
+      ctx.ellipse(cx - T * 1.1, cy + T * 0.2, T * 5.3, T * 2.1, 0.08, 0, Math.PI * 2);
+      ctx.ellipse(cx + T * 1.6, cy + T * 0.45, T * 4.7, T * 1.9, -0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      for (const anchor of anchors) {
+        ctx.fillStyle = 'rgba(0,0,0,0.13)';
+        ctx.beginPath();
+        ctx.ellipse(
+          cx + anchor.ox * T * 0.72,
+          cy + anchor.oy * T * 0.48 + T * 0.42,
+          anchor.size * T * 0.23,
+          anchor.size * T * 0.1,
+          0,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+      }
+
+      anchors.sort((a, b) => a.oy - b.oy);
+      for (const anchor of anchors) {
+        const data = sprites[anchor.sprite % sprites.length];
+        drawTree(
+          data,
+          cx + anchor.ox * T * 0.72,
+          cy + anchor.oy * T * 0.48,
+          anchor.size * T,
+          anchor.sprite * 0.9 + anchor.ox * 0.2,
+        );
+      }
+
+      state.woodPiles
+        .filter(pile => Math.hypot(pile.x - woodNode.x, pile.y - woodNode.y) < 8)
+        .sort((a, b) => a.y - b.y)
+        .forEach(pile => drawWoodPile(pile.x, pile.y, pile.amount));
     } else if (woodNode) {
       drawNodeFallback(woodNode.x, woodNode.y, 'WOOD', 'rgba(76, 175, 80, 0.2)');
+      state.woodPiles
+        .filter(pile => Math.hypot(pile.x - woodNode.x, pile.y - woodNode.y) < 8)
+        .sort((a, b) => a.y - b.y)
+        .forEach(pile => drawWoodPile(pile.x, pile.y, pile.amount));
     }
 
     // Stone node — herd of sheep
@@ -1017,6 +1141,11 @@ export class Renderer {
       items.push({ y: sortY, draw: () => this.drawOneUnit(ctx, state, u) });
     }
 
+    // Dead units linger briefly so bodies can visibly finish collapsing.
+    for (const dead of this.deadUnits) {
+      items.push({ y: dead.y * T, draw: () => this.drawDeadUnit(ctx, dead) });
+    }
+
     // Harvesters — sort by current y
     for (const h of state.harvesters) {
       if (h.state === 'dead') continue;
@@ -1030,6 +1159,65 @@ export class Renderer {
     for (const item of items) {
       item.draw();
     }
+  }
+
+  private updateDeadUnits(dt: number): void {
+    for (let i = this.deadUnits.length - 1; i >= 0; i--) {
+      const dead = this.deadUnits[i];
+      dead.ageSec += dt;
+      if (dead.ageSec >= DEAD_UNIT_LIFETIME_SEC) this.deadUnits.splice(i, 1);
+    }
+  }
+
+  private getUnitFrame(tick: number, cols: number): number {
+    const ticksPerFrame = Math.max(1, Math.round(20 / cols));
+    return Math.floor(tick / ticksPerFrame) % cols;
+  }
+
+  private drawDeadUnit(ctx: CanvasRenderingContext2D, dead: DeadUnitSnapshot): void {
+    const px = dead.x * T;
+    const py = dead.y * T;
+    const cx = px + T / 2;
+    const feetY = py + T * 0.70;
+    const progress = Math.min(1, dead.ageSec / DEAD_UNIT_LIFETIME_SEC);
+    const alpha = 1 - progress * 0.75;
+    const flatten = 1 - progress * 0.72;
+    const rotation = (dead.faceLeft ? -1 : 1) * progress * 1.15;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(cx, py + T - 1, 7 + progress * 3, 2.5 + progress, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const spriteData = dead.race
+      ? this.sprites.getUnitSprite(dead.race, dead.category, dead.playerId, dead.wasAttacking, dead.upgradeNode)
+      : null;
+    const tierScale = 1.0 + (dead.upgradeTier ?? 0) * 0.15;
+
+    if (spriteData) {
+      const [img, def] = spriteData;
+      const spriteScale = def.scale ?? 1.0;
+      const baseH = T * 1.82 * spriteScale * tierScale;
+      const aspect = def.frameW / def.frameH;
+      const drawW = baseH * aspect;
+      const drawH = baseH * (def.heightScale ?? 1.0);
+      const groundY = def.groundY ?? 0.71;
+
+      ctx.translate(cx, feetY);
+      ctx.rotate(rotation);
+      ctx.scale(dead.faceLeft ? -1 : 1, flatten);
+      drawSpriteFrame(ctx, img, def, dead.frame, -drawW / 2, -drawH * groundY, drawW, drawH);
+    } else {
+      const radius = (dead.category === 'ranged' ? 3 : 4) * tierScale;
+      ctx.translate(cx, py + T / 2);
+      ctx.rotate(rotation);
+      ctx.scale(1, flatten);
+      this.drawUnitShape(ctx, 0, 0, radius, dead.race, dead.category, dead.team, PLAYER_COLORS[dead.playerId] || '#888');
+    }
+
+    ctx.restore();
   }
 
   // === HQs ===
@@ -2026,6 +2214,22 @@ export class Renderer {
         ctx.fill();
       }
 
+      if (h.carryingResource === ResourceType.Wood && h.carryAmount > 0 && h.state === 'walking_home') {
+        const faceLeft = this.updateFacing(-h.id, h.x, h.team === Team.Top);
+        const bundleX = px + (faceLeft ? -6 : 6);
+        const bundleY = py - 4;
+        for (let i = 0; i < 3; i++) {
+          const offsetY = i * 2 - 2;
+          ctx.fillStyle = i === 1 ? '#a56a3f' : '#8d5a35';
+          ctx.fillRect(bundleX - 4, bundleY + offsetY - 1, 8, 2);
+          ctx.fillStyle = '#d7b083';
+          ctx.beginPath();
+          ctx.arc(bundleX - 4, bundleY + offsetY, 1, 0, Math.PI * 2);
+          ctx.arc(bundleX + 4, bundleY + offsetY, 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
       if (h.carryingDiamond) {
         ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2);
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
@@ -2276,18 +2480,49 @@ export class Renderer {
     const currentUnitIds = new Set<number>();
     for (const u of state.units) {
       currentUnitIds.add(u.id);
-      this.lastUnitPositions.set(u.id, { x: u.x, y: u.y, team: u.team, race: state.players[u.playerId]?.race });
+      const faceLeft = this.facing.get(u.id) ?? (u.team === Team.Top);
+      const wasAttacking = u.targetId !== null && u.attackTimer <= u.attackSpeed * 0.5;
+      const category = u.category as UnitCategory;
+      const race = state.players[u.playerId]?.race;
+      const spriteData = race
+        ? this.sprites.getUnitSprite(race, category, u.playerId, wasAttacking, u.upgradeNode)
+        : null;
+      const frame = spriteData ? this.getUnitFrame(state.tick, spriteData[1].cols) : 0;
+      this.lastUnitPositions.set(u.id, { x: u.x, y: u.y, team: u.team, race });
+      this.lastUnitRenders.set(u.id, {
+        x: u.x,
+        y: u.y,
+        team: u.team,
+        playerId: u.playerId,
+        race,
+        category,
+        upgradeNode: u.upgradeNode,
+        upgradeTier: u.upgradeTier ?? 0,
+        lane: u.lane,
+        faceLeft,
+        wasAttacking,
+        frame,
+      });
     }
     for (const id of this.lastUnitIds) {
       if (!currentUnitIds.has(id)) {
         const pos = this.lastUnitPositions.get(id);
+        const render = this.lastUnitRenders.get(id);
         if (pos) {
           this.deathEffects.push({
             x: pos.x, y: pos.y, frame: 0, maxFrames: 14,
             size: T * 1.8, type: 'race_burst', race: pos.race
           });
         }
+        if (render) {
+          this.deadUnits.push({
+            id,
+            ...render,
+            ageSec: 0,
+          });
+        }
         this.lastUnitPositions.delete(id);
+        this.lastUnitRenders.delete(id);
         this.prevX.delete(id);
         this.facing.delete(id);
         this.smoothHp.delete(id);
@@ -2854,3 +3089,7 @@ export class Renderer {
     // Minimap label intentionally omitted for a cleaner HUD.
   }
 }
+
+
+
+

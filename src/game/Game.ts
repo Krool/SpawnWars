@@ -168,7 +168,7 @@ export class Game {
 
   stop(): void {
     this.loop.stop();
-    this.sounds.stopMusic();
+    this.sounds.dispose();
     this.input.destroy();
     this.renderer.camera.destroy();
     if (this.commandSync) {

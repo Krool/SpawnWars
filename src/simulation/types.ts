@@ -192,6 +192,9 @@ export interface MapDef {
   /** Per-player harvester hut grid dimensions */
   hutGridCols: number;         // 10 for duel (horizontal), 1 for skirmish (rotated)
   hutGridRows: number;         // 1 for duel, 10 for skirmish (rotated)
+  /** Shared tower alley dimensions (per team) */
+  towerAlleyCols: number;      // 20 for duel, 12 for skirmish (rotated)
+  towerAlleyRows: number;      // 12 for duel, 20 for skirmish (rotated)
   /** Returns true if tile (x, y) is within the playable map boundary */
   isPlayable(x: number, y: number): boolean;
   /** Returns the playable x-range for a given row (portrait) or y-range for a given col (landscape) */
@@ -364,8 +367,19 @@ export interface HarvesterState {
   carryingDiamond: boolean;
   carryingResource: ResourceType | null;
   carryAmount: number;
+  queuedWoodAmount: number;
+  woodCarryTarget: number;
+  woodDropsCreated: number;
   targetCellIdx: number; // index into diamondCells being mined, -1 if none
   fightTargetId: number | null; // harvester id of enemy carrier to attack
+}
+
+export interface WoodPileState {
+  id: number;
+  x: number;
+  y: number;
+  amount: number;
+  age: number;
 }
 
 export interface DiamondState {
@@ -522,6 +536,7 @@ export interface GameState {
   buildings: BuildingState[];
   units: UnitState[];
   harvesters: HarvesterState[];
+  woodPiles: WoodPileState[];
   projectiles: ProjectileState[];
   diamond: DiamondState;
   diamondCells: GoldCell[]; // the mineable gold cells forming the obstacle

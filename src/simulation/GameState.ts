@@ -21,6 +21,10 @@ import {
 
 function genId(state: GameState): number { return state.nextEntityId++; }
 const SELL_COOLDOWN_TICKS = 5 * TICK_RATE;
+const WOOD_CARRY_PER_TRIP = 10;
+const WOOD_DROP_BATCHES = 4;
+const WOOD_PICKUP_RADIUS = 2.35;
+const WOOD_PILE_SPREAD_RADIUS = 3.4;
 
 // Passive income per second per race: +1 of primary resource, +0.1 of secondary
 const PASSIVE_INCOME: Record<Race, { gold: number; wood: number; stone: number }> = {
@@ -288,6 +292,7 @@ export function createInitialState(
     buildings: [],
     units: [],
     harvesters: [],
+    woodPiles: [],
     projectiles: [],
     diamond,
     diamondCells: generateDiamondCells(map),
@@ -334,6 +339,7 @@ export function createInitialState(
       assignment: startAssignment,
       state: 'walking_to_node', miningTimer: 0, respawnTimer: 0,
       carryingDiamond: false, carryingResource: null, carryAmount: 0,
+      queuedWoodAmount: 0, woodCarryTarget: 0, woodDropsCreated: 0,
       targetCellIdx: -1, fightTargetId: null,
     });
   }
@@ -565,6 +571,7 @@ export function simulateTick(state: GameState, commands: GameCommand[]): void {
   tickProjectiles(state);
   tickStatusEffects(state);
   tickNukeTelegraphs(state);
+  for (const pile of state.woodPiles) pile.age++;
   tickHarvesters(state, diamondCellMap);
   tickEffects(state);
   checkWinConditions(state);
@@ -788,6 +795,7 @@ function buildHut(state: GameState, cmd: Extract<GameCommand, { type: 'build_hut
         assignment: HarvesterAssignment.BaseGold,
         state: 'walking_to_node', miningTimer: 0, respawnTimer: 0,
         carryingDiamond: false, carryingResource: null, carryAmount: 0,
+        queuedWoodAmount: 0, woodCarryTarget: 0, woodDropsCreated: 0,
         targetCellIdx: -1, fightTargetId: null,
       });
       addSound(state, 'building_placed', world.x, world.y);
@@ -800,10 +808,15 @@ function setHutAssignment(state: GameState, cmd: Extract<GameCommand, { type: 's
   const h = state.harvesters.find(h => h.hutId === cmd.hutId && h.playerId === cmd.playerId);
   if (!h) return;
   h.assignment = cmd.assignment;
+  if (h.assignment !== HarvesterAssignment.Wood) {
+    spillCarriedWood(state, h);
+  }
   if (h.state === 'walking_to_node' || h.state === 'mining') {
     h.state = 'walking_to_node';
     h.miningTimer = 0;
     h.targetCellIdx = -1;
+    h.woodDropsCreated = 0;
+    h.woodCarryTarget = 0;
   }
 }
 
@@ -867,7 +880,61 @@ function dropDiamond(state: GameState, x: number, y: number): void {
   state.diamond.carrierType = null;
 }
 
-function killHarvester(h: HarvesterState): void {
+function dropWoodPile(state: GameState, x: number, y: number, amount: number, angleSeed = 0): void {
+  if (amount <= 0) return;
+  const angle = (angleSeed * 1.61803398875 + state.tick * 0.11) % (Math.PI * 2);
+  const ring = 1.2 + ((angleSeed * 0.73) % 1) * WOOD_PILE_SPREAD_RADIUS;
+  const pile = {
+    id: genId(state),
+    x: x + Math.cos(angle) * ring,
+    y: y + Math.sin(angle) * ring * 0.65,
+    amount,
+    age: 0,
+  };
+  clampToArenaBounds(pile, 0.35, state.mapDef);
+  state.woodPiles.push(pile);
+}
+
+function collectWoodPiles(state: GameState, x: number, y: number, desiredAmount: number): number {
+  if (desiredAmount <= 0) return 0;
+  const nearby = state.woodPiles
+    .map((pile, index) => ({ pile, index, dist: Math.hypot(pile.x - x, pile.y - y) }))
+    .filter(entry => entry.dist <= WOOD_PICKUP_RADIUS)
+    .sort((a, b) => a.dist - b.dist);
+
+  let gathered = 0;
+  const remove = new Set();
+  for (const entry of nearby) {
+    if (gathered >= desiredAmount) break;
+    const take = Math.min(entry.pile.amount, desiredAmount - gathered);
+    gathered += take;
+    entry.pile.amount -= take;
+    if (entry.pile.amount <= 0) remove.add(entry.index);
+  }
+
+  if (remove.size > 0) {
+    state.woodPiles = state.woodPiles.filter((_, index) => !remove.has(index));
+  }
+  return gathered;
+}
+
+function spillCarriedWood(state: GameState, h: HarvesterState): void {
+  const looseWood = (h.carryingResource === ResourceType.Wood ? h.carryAmount : 0) + h.queuedWoodAmount;
+  if (looseWood > 0) {
+    dropWoodPile(state, h.x, h.y, looseWood, h.id + looseWood);
+  }
+  if (h.carryingResource === ResourceType.Wood) {
+    h.carryingResource = null;
+    h.carryAmount = 0;
+  }
+  h.queuedWoodAmount = 0;
+  h.woodCarryTarget = 0;
+  h.woodDropsCreated = 0;
+}
+
+function killHarvester(state: GameState, h: HarvesterState): void {
+  if (h.carryingDiamond) dropDiamond(state, h.x, h.y);
+  spillCarriedWood(state, h);
   h.state = 'dead';
   h.hp = 0;
   h.respawnTimer = HARVESTER_RESPAWN_TICKS;
@@ -1901,7 +1968,7 @@ function tickHQDefense(state: GameState): void {
     if (closestHarv.hp <= 0) {
       addDeathParticles(state, closestHarv.x, closestHarv.y, '#ffaa00', 4);
       if (closestHarv.carryingDiamond) dropDiamond(state, closestHarv.x, closestHarv.y);
-      killHarvester(closestHarv);
+      killHarvester(state, closestHarv);
     }
   }
 }
@@ -1992,7 +2059,7 @@ function tickTowers(state: GameState): void {
       if (closestHarv.hp <= 0) {
         addDeathParticles(state, closestHarv.x, closestHarv.y, '#ffaa00', 4);
         if (closestHarv.carryingDiamond) dropDiamond(state, closestHarv.x, closestHarv.y);
-        killHarvester(closestHarv);
+        killHarvester(state, closestHarv);
       }
       building.actionTimer = Math.round(stats.attackSpeed * TICK_RATE);
     }
@@ -2453,7 +2520,7 @@ function executeNukeDetonation(state: GameState, playerId: number, x: number, y:
     if ((h.x - x) ** 2 + (h.y - y) ** 2 <= radius * radius) {
       addDeathParticles(state, h.x, h.y, '#ff4400', 6);
       if (h.carryingDiamond) dropDiamond(state, h.x, h.y);
-      killHarvester(h);
+      killHarvester(state, h);
     }
   }
 
@@ -2470,8 +2537,9 @@ function findOpenMiningSpot(state: GameState, h: HarvesterState, target: { x: nu
   );
   if (otherMiners.length === 0) return target;
 
-  // Find an offset spot in a ring around the node
-  const ringDist = 1.0 + otherMiners.length * 0.6;
+  // Wood nodes read better with a wider ring so the forest feels broader and less pinched.
+  const baseRing = h.assignment === HarvesterAssignment.Wood ? 1.8 : 1.0;
+  const ringDist = baseRing + otherMiners.length * 0.75;
   const angleStep = (Math.PI * 2) / 8;
   const baseAngle = (h.id * 137.508) % (Math.PI * 2); // golden angle spread
   let bestSpot = target;
@@ -2524,6 +2592,7 @@ function tickHarvesters(state: GameState, cellMap: Map<string, GoldCell>): void 
     const hutExists = state.buildings.some(b => b.id === h.hutId);
     if (!hutExists) {
       if (h.carryingDiamond) dropDiamond(state, h.x, h.y);
+      spillCarriedWood(state, h);
       return false;
     }
     return true;
@@ -2538,6 +2607,7 @@ function tickHarvesters(state: GameState, cellMap: Map<string, GoldCell>): void 
           h.x = hut.worldX; h.y = hut.worldY;
           h.hp = h.maxHp; h.state = 'walking_to_node';
           h.carryingDiamond = false; h.carryingResource = null; h.carryAmount = 0;
+          h.queuedWoodAmount = 0; h.woodCarryTarget = 0; h.woodDropsCreated = 0;
           h.targetCellIdx = -1; h.fightTargetId = null; h.damage = 0;
         }
       }
@@ -2565,6 +2635,7 @@ function tickHarvesters(state: GameState, cellMap: Map<string, GoldCell>): void 
       }
       // Interrupt mining
       if (h.state === 'mining') {
+        if (h.assignment === HarvesterAssignment.Wood) spillCarriedWood(state, h);
         h.state = 'walking_to_node';
         h.targetCellIdx = -1;
       }
@@ -2578,29 +2649,67 @@ function tickHarvesters(state: GameState, cellMap: Map<string, GoldCell>): void 
       continue;
     }
 
+    const baseTarget = getResourceNodePosition(h, state.mapDef);
     if (h.state === 'walking_to_node') {
-      const baseTarget = getResourceNodePosition(h, state.mapDef);
       const target = findOpenMiningSpot(state, h, baseTarget);
       const dx = target.x - h.x, dy = target.y - h.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 1) {
-        h.state = 'mining';
-        h.miningTimer = MINE_TIME_BASE_TICKS;
+        if (h.assignment === HarvesterAssignment.Wood) {
+          const gathered = collectWoodPiles(state, baseTarget.x, baseTarget.y, WOOD_CARRY_PER_TRIP);
+          if (gathered >= WOOD_CARRY_PER_TRIP) {
+            h.carryingResource = ResourceType.Wood;
+            h.carryAmount = gathered;
+            h.state = 'walking_home';
+            h.queuedWoodAmount = 0;
+            h.woodCarryTarget = 0;
+            h.woodDropsCreated = 0;
+          } else {
+            h.queuedWoodAmount = gathered;
+            h.woodCarryTarget = WOOD_CARRY_PER_TRIP;
+            h.woodDropsCreated = 0;
+            h.state = 'mining';
+            h.miningTimer = MINE_TIME_BASE_TICKS;
+          }
+        } else {
+          h.state = 'mining';
+          h.miningTimer = MINE_TIME_BASE_TICKS;
+        }
       } else {
         moveWithSlide(h, target.x, target.y, movePerTick, state.diamondCells, state.mapDef);
       }
     } else if (h.state === 'mining') {
       h.miningTimer--;
+      if (h.assignment === HarvesterAssignment.Wood) {
+        const missingWood = Math.max(0, h.woodCarryTarget - h.queuedWoodAmount);
+        const batchCount = Math.max(1, Math.min(WOOD_DROP_BATCHES, missingWood));
+        const progress = Math.max(0, MINE_TIME_BASE_TICKS - h.miningTimer);
+        const desiredDrops = Math.min(batchCount, Math.floor((progress / MINE_TIME_BASE_TICKS) * batchCount));
+        while (h.woodDropsCreated < desiredDrops) {
+          const batchIndex = h.woodDropsCreated;
+          const amount = Math.floor(missingWood / batchCount) + (batchIndex < (missingWood % batchCount) ? 1 : 0);
+          if (amount > 0) dropWoodPile(state, baseTarget.x, baseTarget.y, amount, h.id * 17 + batchIndex * 29);
+          h.woodDropsCreated++;
+        }
+      }
       if (h.miningTimer <= 0) {
         switch (h.assignment) {
           case HarvesterAssignment.BaseGold:
             h.carryingResource = ResourceType.Gold; h.carryAmount = 5; break;
-          case HarvesterAssignment.Wood:
-            h.carryingResource = ResourceType.Wood; h.carryAmount = 10; break;
+          case HarvesterAssignment.Wood: {
+            const missingWood = Math.max(0, h.woodCarryTarget - h.queuedWoodAmount);
+            h.queuedWoodAmount += collectWoodPiles(state, baseTarget.x, baseTarget.y, missingWood);
+            h.carryingResource = ResourceType.Wood;
+            h.carryAmount = h.queuedWoodAmount;
+            h.queuedWoodAmount = 0;
+            h.woodCarryTarget = 0;
+            h.woodDropsCreated = 0;
+            break;
+          }
           case HarvesterAssignment.Stone:
             h.carryingResource = ResourceType.Stone; h.carryAmount = 10; break;
         }
-        h.state = 'walking_home';
+        h.state = h.carryAmount > 0 ? 'walking_home' : 'walking_to_node';
       }
     } else if (h.state === 'walking_home') {
       walkHome(state, h, movePerTick);
@@ -2632,7 +2741,7 @@ function tickCenterHarvester(state: GameState, h: HarvesterState, movePerTick: n
         addFloatingText(state, enemyCarrier.x, enemyCarrier.y, `-${h.damage}`, '#ff8800');
         if (enemyCarrier.hp <= 0) {
           dropDiamond(state, enemyCarrier.x, enemyCarrier.y);
-          killHarvester(enemyCarrier);
+          killHarvester(state, enemyCarrier);
         }
       }
     } else {
@@ -2747,6 +2856,9 @@ function walkHome(state: GameState, h: HarvesterState, movePerTick: number): voi
     }
     h.carryingResource = null;
     h.carryAmount = 0;
+    h.queuedWoodAmount = 0;
+    h.woodCarryTarget = 0;
+    h.woodDropsCreated = 0;
     h.state = 'walking_to_node';
   } else {
     moveWithSlide(h, tx, ty, movePerTick, state.diamondCells);

@@ -116,6 +116,8 @@ export const DUEL_MAP: MapDef = {
   buildGridRows: BUILD_GRID_ROWS,   // 3
   hutGridCols: 10,
   hutGridRows: 1,
+  towerAlleyCols: SHARED_ALLEY_COLS,  // 20
+  towerAlleyRows: SHARED_ALLEY_ROWS,  // 12
 
   resourceNodes: [
     { type: ResourceType.Wood, x: WOOD_NODE_X, y: 60 },
@@ -209,18 +211,21 @@ function skHutGridOrigin(side: 'left' | 'right', slotInTeam: number): Vec2 {
   return { x, y };
 }
 
-// HQ + tower alley positions
+// HQ center positions
+const SK_LEFT_HQ_CX = 14;
+const SK_RIGHT_HQ_CX = SK_W - 14; // 146
 const SK_HQ_Y = Math.floor(SK_H / 2) - Math.floor(HQ_HEIGHT / 2); // 43
-const SK_ALLEY_Y = Math.floor(SK_H / 2) - Math.floor(SHARED_ALLEY_ROWS / 2); // 39
+
+// Skirmish tower alley: 12 wide × 20 tall (rotated 90° from duel's 20×12)
+const SK_ALLEY_COLS = 12;
+const SK_ALLEY_ROWS = 20;
+const SK_ALLEY_Y = Math.floor(SK_H / 2) - Math.floor(SK_ALLEY_ROWS / 2); // 35
+// Alley sits right of HQ (left side) / left of HQ (right side) with 1-tile gap
+const SK_ALLEY_LEFT_X = SK_LEFT_HQ_CX + Math.ceil(HQ_WIDTH / 2) + 1; // 19
 
 // Lane Y positions (in gaps between strips)
 const SK_TOP_LANE_Y = skPlayerStripY(0) + SK_PLAYER_STRIP_H + Math.floor(SK_STRIP_GAP / 2); // 31
 const SK_BOT_LANE_Y = skPlayerStripY(1) + SK_PLAYER_STRIP_H + Math.floor(SK_STRIP_GAP / 2); // 60
-
-// Lane paths converge at HQ on each side, fan out through the map, fork around diamond
-// Left HQ center: ~(14, 44), Right HQ center: ~(146, 44)
-const SK_LEFT_HQ_CX = 14;
-const SK_RIGHT_HQ_CX = SK_W - 14;
 
 function skLanePath(forkDir: 'top' | 'bottom'): Vec2[] {
   const laneY = forkDir === 'top' ? SK_TOP_LANE_Y : SK_BOT_LANE_Y;
@@ -253,15 +258,15 @@ export const SKIRMISH_MAP: MapDef = {
   shapeAxis: 'x',
 
   teams: [
-    // Team 0 (Left) — HQ inside tower alley, near left edge
+    // Team 0 (Left) — HQ near left edge, tower alley right of HQ
     {
       hqPosition: { x: SK_LEFT_HQ_CX - Math.floor(HQ_WIDTH / 2), y: SK_HQ_Y },
-      towerAlleyOrigin: { x: 10, y: SK_ALLEY_Y },
+      towerAlleyOrigin: { x: SK_ALLEY_LEFT_X, y: SK_ALLEY_Y },
     },
     // Team 1 (Right) — mirrored
     {
       hqPosition: { x: SK_RIGHT_HQ_CX - Math.floor(HQ_WIDTH / 2), y: SK_HQ_Y },
-      towerAlleyOrigin: { x: SK_W - 10 - SHARED_ALLEY_COLS, y: SK_ALLEY_Y },
+      towerAlleyOrigin: { x: SK_W - SK_ALLEY_LEFT_X - SK_ALLEY_COLS, y: SK_ALLEY_Y },
     },
   ],
 
@@ -291,6 +296,8 @@ export const SKIRMISH_MAP: MapDef = {
   buildGridRows: SK_BUILD_ROWS,   // 14
   hutGridCols: SK_HUT_COLS,       // 1
   hutGridRows: SK_HUT_ROWS,       // 10
+  towerAlleyCols: SK_ALLEY_COLS,  // 12
+  towerAlleyRows: SK_ALLEY_ROWS,  // 20
 
   resourceNodes: [
     { type: ResourceType.Wood, x: SK_DIAMOND_X, y: 6 },

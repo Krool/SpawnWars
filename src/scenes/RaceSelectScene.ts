@@ -3,6 +3,9 @@ import { Race } from '../simulation/types';
 import { RACE_COLORS } from '../simulation/data';
 import { SpriteLoader, drawSpriteFrame } from '../rendering/SpriteLoader';
 import { UIAssets } from '../rendering/UIAssets';
+import { SoundManager } from '../audio/SoundManager';
+import { getAudioSettings, subscribeToAudioSettings, updateAudioSettings } from '../audio/AudioSettings';
+import { drawSettingsButton, drawSettingsOverlay, getSettingsOverlayLayout, hitRect, sliderValueFromPoint } from '../ui/SettingsOverlay';
 
 type ResIcon = 'uiGold' | 'uiWood' | 'uiMeat';
 
@@ -14,21 +17,20 @@ interface RaceOption {
 }
 
 const RACES: RaceOption[] = [
-  { race: Race.Crown,    label: 'CROWN',    desc: 'Shield + balance',        econ: ['uiGold', 'uiWood']  },
-  { race: Race.Horde,    label: 'HORDE',    desc: 'Brute force + knockback', econ: ['uiGold', 'uiMeat']  },
-  { race: Race.Goblins,  label: 'GOBLINS',  desc: 'Speed + poison',          econ: ['uiGold', 'uiWood']  },
-  { race: Race.Oozlings, label: 'OOZLINGS', desc: 'Swarm + haste',           econ: ['uiGold', 'uiMeat']  },
-  { race: Race.Demon,    label: 'DEMON',    desc: 'Glass cannon + burn',     econ: ['uiMeat', 'uiWood']  },
-  { race: Race.Deep,     label: 'DEEP',     desc: 'Control + slow',          econ: ['uiWood', 'uiGold']  },
-  { race: Race.Wild,     label: 'WILD',     desc: 'Aggro + poison',          econ: ['uiWood', 'uiMeat']  },
-  { race: Race.Geists,   label: 'GEISTS',   desc: 'Undying + lifesteal',     econ: ['uiMeat', 'uiGold']  },
-  { race: Race.Tenders,  label: 'TENDERS',  desc: 'Regen + healing',         econ: ['uiWood', 'uiGold']  },
+  { race: Race.Crown, label: 'CROWN', desc: 'Shield + balance', econ: ['uiGold', 'uiWood'] },
+  { race: Race.Horde, label: 'HORDE', desc: 'Brute force + knockback', econ: ['uiGold', 'uiMeat'] },
+  { race: Race.Goblins, label: 'GOBLINS', desc: 'Speed + poison', econ: ['uiGold', 'uiWood'] },
+  { race: Race.Oozlings, label: 'OOZLINGS', desc: 'Swarm + haste', econ: ['uiGold', 'uiMeat'] },
+  { race: Race.Demon, label: 'DEMON', desc: 'Glass cannon + burn', econ: ['uiMeat', 'uiWood'] },
+  { race: Race.Deep, label: 'DEEP', desc: 'Control + slow', econ: ['uiWood', 'uiGold'] },
+  { race: Race.Wild, label: 'WILD', desc: 'Aggro + poison', econ: ['uiWood', 'uiMeat'] },
+  { race: Race.Geists, label: 'GEISTS', desc: 'Undying + lifesteal', econ: ['uiMeat', 'uiGold'] },
+  { race: Race.Tenders, label: 'TENDERS', desc: 'Regen + healing', econ: ['uiWood', 'uiGold'] },
 ];
 
 const COLS = 3;
 const ROWS = 3;
 
-// Helper: draw white text with a dark drop-shadow for readability on wood
 function woodText(
   ctx: CanvasRenderingContext2D, text: string, x: number, y: number,
   color = '#fff', shadowColor = 'rgba(0,0,0,0.6)',
@@ -48,6 +50,10 @@ export class RaceSelectScene implements Scene {
   private sprites: SpriteLoader;
   private ui: UIAssets;
   private tick = 0;
+  private settingsOpen = false;
+  private music = new SoundManager();
+  private audioSettings = getAudioSettings();
+  private audioSettingsUnsub: (() => void) | null = null;
 
   private clickHandler: ((e: MouseEvent) => void) | null = null;
   private moveHandler: ((e: MouseEvent) => void) | null = null;
@@ -64,8 +70,14 @@ export class RaceSelectScene implements Scene {
 
   enter(): void {
     this.hoverIndex = -1;
+    this.settingsOpen = false;
+    this.audioSettingsUnsub = subscribeToAudioSettings((settings) => {
+      this.audioSettings = settings;
+    });
+    this.music.startRaceSelectMusic(RACES[this.selectedIndex].race);
 
     this.keyHandler = (e) => {
+      const prevIndex = this.selectedIndex;
       const col = this.selectedIndex % COLS;
       const row = Math.floor(this.selectedIndex / COLS);
       if (e.key === 'ArrowLeft' || e.key === 'a') { if (col > 0) this.selectedIndex--; }
@@ -73,15 +85,21 @@ export class RaceSelectScene implements Scene {
       if (e.key === 'ArrowUp' || e.key === 'w') { if (row > 0) this.selectedIndex -= COLS; }
       if (e.key === 'ArrowDown' || e.key === 's') { if (row < ROWS - 1) this.selectedIndex += COLS; }
       this.selectedIndex = Math.max(0, Math.min(RACES.length - 1, this.selectedIndex));
+      if (this.selectedIndex !== prevIndex) this.music.previewRaceSelection(RACES[this.selectedIndex].race);
       if (e.key === 'Enter' || e.key === ' ') this.confirm();
-      if (e.key === 'Escape') this.manager.switchTo('title');
+      if (e.key === 'Escape') {
+        if (this.settingsOpen) this.settingsOpen = false;
+        else this.manager.switchTo('title');
+      }
     };
 
     this.clickHandler = (e) => {
       const [cx, cy] = this.toCanvasCoords(e.clientX, e.clientY);
+      if (this.handleSettingsClick(cx, cy)) return;
       const idx = this.getBoxIndexAt(cx, cy);
       if (idx >= 0) {
         this.selectedIndex = idx;
+        this.music.previewRaceSelection(RACES[this.selectedIndex].race);
       } else if (this.isStartButtonAt(cx, cy)) {
         this.confirm();
       }
@@ -97,9 +115,11 @@ export class RaceSelectScene implements Scene {
       const touch = e.touches[0];
       if (!touch) return;
       const [cx, cy] = this.toCanvasCoords(touch.clientX, touch.clientY);
+      if (this.handleSettingsClick(cx, cy)) return;
       const idx = this.getBoxIndexAt(cx, cy);
       if (idx >= 0) {
         this.selectedIndex = idx;
+        this.music.previewRaceSelection(RACES[this.selectedIndex].race);
       } else if (this.isStartButtonAt(cx, cy)) {
         this.confirm();
       }
@@ -120,6 +140,33 @@ export class RaceSelectScene implements Scene {
     this.clickHandler = null;
     this.moveHandler = null;
     this.touchHandler = null;
+    this.audioSettingsUnsub?.();
+    this.audioSettingsUnsub = null;
+    this.music.dispose();
+  }
+
+  private handleSettingsClick(cx: number, cy: number): boolean {
+    const layout = getSettingsOverlayLayout(this.canvas.clientWidth, this.canvas.clientHeight);
+    if (hitRect(cx, cy, layout.button)) {
+      this.settingsOpen = !this.settingsOpen;
+      return true;
+    }
+    if (!this.settingsOpen) return false;
+    if (hitRect(cx, cy, layout.close)) {
+      this.settingsOpen = false;
+      return true;
+    }
+    if (hitRect(cx, cy, layout.musicRow)) {
+      updateAudioSettings({ musicVolume: sliderValueFromPoint(cx, layout.musicRow) });
+      return true;
+    }
+    if (hitRect(cx, cy, layout.sfxRow)) {
+      updateAudioSettings({ sfxVolume: sliderValueFromPoint(cx, layout.sfxRow) });
+      return true;
+    }
+    if (hitRect(cx, cy, layout.panel)) return true;
+    this.settingsOpen = false;
+    return false;
   }
 
   private confirm(): void {
@@ -182,7 +229,6 @@ export class RaceSelectScene implements Scene {
     const h = ctx.canvas.clientHeight;
     ctx.imageSmoothingEnabled = false;
 
-    // Water background
     if (!this.ui.drawWaterBg(ctx, w, h, this.tick * 50)) {
       ctx.fillStyle = '#2a5a6a';
       ctx.fillRect(0, 0, w, h);
@@ -190,7 +236,6 @@ export class RaceSelectScene implements Scene {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.fillRect(0, 0, w, h);
 
-    // Header ribbon
     const ribbonW = Math.min(w * 0.7, 500);
     const ribbonH = Math.min(56, h * 0.07);
     const ribbonX = (w - ribbonW) / 2;
@@ -208,7 +253,6 @@ export class RaceSelectScene implements Scene {
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.fillText('Arrow keys + Enter  |  Click to select', w / 2, ribbonY + ribbonH + 12);
 
-    // Race cards
     const boxes = this.getBoxLayout();
     const fontSize = Math.max(10, Math.min(boxes[0].w / 8, 16));
 
@@ -224,12 +268,10 @@ export class RaceSelectScene implements Scene {
       ctx.rect(box.x, box.y, box.w, box.h);
       ctx.clip();
 
-      // Wood table 9-slice background — oversized to push dead space outside clip rect
       const bgPadX = Math.round(box.w * 0.075);
       const bgPadY = Math.round(box.h * 0.075);
       this.ui.drawWoodTable(ctx, box.x - bgPadX, box.y - bgPadY, box.w + bgPadX * 2, box.h + bgPadY * 2);
 
-      // Selection glow
       if (isSelected) {
         ctx.strokeStyle = colors.primary;
         ctx.shadowColor = colors.primary;
@@ -244,12 +286,10 @@ export class RaceSelectScene implements Scene {
       }
 
       const cx = box.x + box.w / 2;
-
-      // Unit sprites in top ~40% of card, bottom-anchored to shared baseline
       const unitTypes: ('melee' | 'ranged' | 'caster')[] = ['melee', 'ranged', 'caster'];
       const spriteSlotW = box.w / 3;
       const spriteZoneH = box.h * 0.38;
-      const spriteBaseY = box.y + 6 + spriteZoneH; // shared ground line
+      const spriteBaseY = box.y + 6 + spriteZoneH;
       for (let ui = 0; ui < unitTypes.length; ui++) {
         const spriteData = this.sprites.getUnitSprite(race.race, unitTypes[ui], 0);
         if (!spriteData) continue;
@@ -266,7 +306,6 @@ export class RaceSelectScene implements Scene {
         drawSpriteFrame(ctx, img, def, frame, dx, dy, drawW, drawH);
       }
 
-      // Race name - white with dark shadow for readability on wood
       const nameFontSize = fontSize * 1.5;
       const nameY = box.y + box.h * 0.50;
       ctx.textAlign = 'center';
@@ -274,11 +313,9 @@ export class RaceSelectScene implements Scene {
       const nameColor = isSelected ? colors.primary : '#fff';
       woodText(ctx, race.label, cx, nameY, nameColor, 'rgba(0,0,0,0.7)');
 
-      // Description
       ctx.font = `${fontSize * 0.72}px monospace`;
       woodText(ctx, race.desc, cx, nameY + nameFontSize * 0.85, '#ddd', 'rgba(0,0,0,0.5)');
 
-      // Economy icons - smaller, below description
       const iconSize = fontSize * 1.8;
       const iconGap = iconSize * 0.5;
       const iconY = box.y + box.h * 0.70;
@@ -295,7 +332,6 @@ export class RaceSelectScene implements Scene {
         }
       }
 
-      // Selected indicator ribbon
       if (isSelected) {
         const selRibW = box.w * 0.65;
         const selRibH = fontSize * 1.3;
@@ -311,7 +347,6 @@ export class RaceSelectScene implements Scene {
       ctx.restore();
     }
 
-    // Start button - Sword
     const btnW = 260;
     const btnH = 56;
     const btnX = (w - btnW) / 2;
@@ -320,16 +355,18 @@ export class RaceSelectScene implements Scene {
 
     ctx.font = 'bold 18px monospace';
     ctx.textAlign = 'center';
-    // Text on the blade portion (offset right past the handle)
     const textX = btnX + btnW * 0.52;
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillText('NEXT', textX + 1, btnY + btnH * 0.58 + 1);
     ctx.fillStyle = '#fff';
     ctx.fillText('NEXT', textX, btnY + btnH * 0.58);
 
-    // Back hint
     ctx.font = `${hintSize}px monospace`;
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.fillText('ESC to go back', w / 2, h - 10);
+
+    const settingsLayout = getSettingsOverlayLayout(w, h);
+    drawSettingsButton(ctx, this.ui, settingsLayout.button, this.settingsOpen);
+    if (this.settingsOpen) drawSettingsOverlay(ctx, this.ui, settingsLayout, this.audioSettings);
   }
 }

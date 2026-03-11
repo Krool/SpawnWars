@@ -9,6 +9,9 @@ import { isFirebaseConfigured, initFirebase } from '../network/FirebaseService';
 import { PlayerProfile, ALL_AVATARS } from '../profile/ProfileData';
 import { BotDifficultyLevel } from '../simulation/BotAI';
 import { getMapById } from '../simulation/maps';
+import { SoundManager } from '../audio/SoundManager';
+import { getAudioSettings, subscribeToAudioSettings, updateAudioSettings } from '../audio/AudioSettings';
+import { drawSettingsButton, drawSettingsOverlay, getSettingsOverlayLayout, hitRect as hitOverlayRect, sliderValueFromPoint } from '../ui/SettingsOverlay';
 
 const PARTY_DIFFICULTY_OPTIONS: { level: BotDifficultyLevel; label: string; color: string }[] = [
   { level: BotDifficultyLevel.Easy, label: 'EASY', color: '#4caf50' },
@@ -396,7 +399,8 @@ class TitleSfx {
     osc.type = type;
     osc.frequency.value = freq;
     const t0 = ac.currentTime + delay;
-    g.gain.setValueAtTime(gain, t0);
+    const scaledGain = gain * getAudioSettings().sfxVolume;
+    g.gain.setValueAtTime(scaledGain, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
     osc.connect(g).connect(ac.destination);
     osc.start(t0);
@@ -411,7 +415,8 @@ class TitleSfx {
     const t0 = ac.currentTime + delay;
     osc.frequency.setValueAtTime(from, t0);
     osc.frequency.exponentialRampToValueAtTime(to, t0 + dur);
-    g.gain.setValueAtTime(gain, t0);
+    const scaledGain = gain * getAudioSettings().sfxVolume;
+    g.gain.setValueAtTime(scaledGain, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
     osc.connect(g).connect(ac.destination);
     osc.start(t0);
@@ -597,6 +602,10 @@ export class TitleScene implements Scene {
 
   // Sound
   private sfx = new TitleSfx();
+  private menuMusic = new SoundManager();
+  private audioSettings = getAudioSettings();
+  private audioSettingsUnsub: (() => void) | null = null;
+  private settingsOpen = false;
   private userInteracted = false;
   private fightStartPlayed = false;
 
@@ -652,6 +661,10 @@ export class TitleScene implements Scene {
     this.winText = '';
     this.winTimer = 0;
     this.userInteracted = false;
+    this.settingsOpen = false;
+    this.audioSettingsUnsub = subscribeToAudioSettings((settings) => {
+      this.audioSettings = settings;
+    });
     this.joinCodeInput = '';
     this.joinInputActive = false;
     this.partyError = '';
@@ -664,7 +677,10 @@ export class TitleScene implements Scene {
       this.party.addListener(this.partyListener);
     }
 
-    const interactHandler = () => { this.userInteracted = true; };
+    const interactHandler = () => {
+      this.userInteracted = true;
+      this.menuMusic.startMenuMusic();
+    };
     this.clickHandler = (e: MouseEvent) => {
       interactHandler();
       if (this.dragJustEnded) { this.dragJustEnded = false; return; }
@@ -684,6 +700,11 @@ export class TitleScene implements Scene {
       this.handleClick(cx, cy);
     };
     this.keyHandler = (e: KeyboardEvent) => {
+      interactHandler();
+      if (this.settingsOpen && e.key === 'Escape') {
+        this.settingsOpen = false;
+        return;
+      }
       if (this.joinInputActive) {
         if (e.key === 'Escape') { this.joinInputActive = false; this.joinCodeInput = ''; return; }
         if (e.key === 'Backspace') { this.joinCodeInput = this.joinCodeInput.slice(0, -1); return; }
@@ -779,6 +800,9 @@ export class TitleScene implements Scene {
     this.mouseDownHandler = null;
     this.mouseMoveHandler = null;
     this.mouseUpHandler = null;
+    this.audioSettingsUnsub?.();
+    this.audioSettingsUnsub = null;
+    this.menuMusic.dispose();
     if (this.party) {
       this.party.removeListener(this.partyListener);
     }
@@ -901,6 +925,28 @@ export class TitleScene implements Scene {
   }
 
   private handleClick(cx: number, cy: number): void {
+    const settingsLayout = getSettingsOverlayLayout(this.canvas.clientWidth, this.canvas.clientHeight);
+    if (hitOverlayRect(cx, cy, settingsLayout.button)) {
+      this.settingsOpen = !this.settingsOpen;
+      return;
+    }
+    if (this.settingsOpen) {
+      if (hitOverlayRect(cx, cy, settingsLayout.close)) {
+        this.settingsOpen = false;
+        return;
+      }
+      if (hitOverlayRect(cx, cy, settingsLayout.musicRow)) {
+        updateAudioSettings({ musicVolume: sliderValueFromPoint(cx, settingsLayout.musicRow) });
+        return;
+      }
+      if (hitOverlayRect(cx, cy, settingsLayout.sfxRow)) {
+        updateAudioSettings({ sfxVolume: sliderValueFromPoint(cx, settingsLayout.sfxRow) });
+        return;
+      }
+      if (hitOverlayRect(cx, cy, settingsLayout.panel)) return;
+      this.settingsOpen = false;
+    }
+
     // Duel control buttons (always active)
     if (this.hitRect(cx, cy, this.resetEloBtnRect)) {
       saveAllElo({});
@@ -1536,6 +1582,10 @@ export class TitleScene implements Scene {
     } else {
       this.renderMenuButtons(ctx, w, h);
     }
+
+    const settingsLayout = getSettingsOverlayLayout(w, h);
+    drawSettingsButton(ctx, this.ui, settingsLayout.button, this.settingsOpen);
+    if (this.settingsOpen) drawSettingsOverlay(ctx, this.ui, settingsLayout, this.audioSettings);
 
     // Party error toast
     if (this.partyError && this.partyErrorTimer > 0) {

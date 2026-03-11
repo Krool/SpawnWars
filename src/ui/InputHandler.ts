@@ -2,7 +2,7 @@ import { Game } from '../game/Game';
 import { Camera } from '../rendering/Camera';
 import { Renderer } from '../rendering/Renderer';
 import {
-  BuildingType, TILE_SIZE, SHARED_ALLEY_COLS, SHARED_ALLEY_ROWS, Lane,
+  BuildingType, TILE_SIZE, Lane,
   HarvesterAssignment, Team, ZONES, Race, UnitState,
 } from '../simulation/types';
 import { getBuildGridOrigin, getTeamAlleyOrigin, getHutGridOrigin } from '../simulation/GameState';
@@ -44,6 +44,9 @@ const UI_FEEDBACK_STORAGE_KEY = 'spawnwars.uiFeedbackEnabled';
 const RADIAL_ARM_MS_STORAGE_KEY = 'spawnwars.radialArmMs';
 const RADIAL_SIZE_STORAGE_KEY = 'spawnwars.radialSize';
 const RADIAL_A11Y_STORAGE_KEY = 'spawnwars.radialA11y';
+const CAMERA_SNAP_STORAGE_KEY = 'spawnwars.cameraSnapOnSelect';
+const MINIMAP_PAN_STORAGE_KEY = 'spawnwars.minimapPanEnabled';
+const STICKY_BUILD_STORAGE_KEY = 'spawnwars.stickyBuildMode';
 const MOBILE_HINT_SEEN_KEY = 'spawnwars.mobileHintSeen';
 
 export class InputHandler {
@@ -71,6 +74,9 @@ export class InputHandler {
   private radialSize = 74;
   private radialAccessibility = false;
   private uiFeedbackEnabled = true;
+  private cameraSnapOnSelect = true;
+  private minimapPanEnabled = true;
+  private stickyBuildMode = false;
   private audioCtx: AudioContext | null = null;
   private nukeTargeting = false;
   private tooltip: { text: string; x: number; y: number } | null = null;
@@ -117,6 +123,11 @@ export class InputHandler {
       const radialSize = Number(window.localStorage.getItem(RADIAL_SIZE_STORAGE_KEY));
       if (Number.isFinite(radialSize) && radialSize >= 56 && radialSize <= 120) this.radialSize = Math.round(radialSize);
       this.radialAccessibility = window.localStorage.getItem(RADIAL_A11Y_STORAGE_KEY) === '1';
+      const cameraSnap = window.localStorage.getItem(CAMERA_SNAP_STORAGE_KEY);
+      if (cameraSnap === '0') this.cameraSnapOnSelect = false;
+      const minimapPan = window.localStorage.getItem(MINIMAP_PAN_STORAGE_KEY);
+      if (minimapPan === '0') this.minimapPanEnabled = false;
+      this.stickyBuildMode = window.localStorage.getItem(STICKY_BUILD_STORAGE_KEY) === '1';
     } catch { /* ignore storage errors */ }
   }
 
@@ -138,15 +149,27 @@ export class InputHandler {
     } catch { /* ignore storage errors */ }
   }
 
+  private saveGameplaySettings(): void {
+    try {
+      window.localStorage.setItem(CAMERA_SNAP_STORAGE_KEY, this.cameraSnapOnSelect ? '1' : '0');
+      window.localStorage.setItem(MINIMAP_PAN_STORAGE_KEY, this.minimapPanEnabled ? '1' : '0');
+      window.localStorage.setItem(STICKY_BUILD_STORAGE_KEY, this.stickyBuildMode ? '1' : '0');
+    } catch { /* ignore storage errors */ }
+  }
+
   private resetUiDefaults(): void {
     this.laneToggleMode = 'double';
     this.uiFeedbackEnabled = true;
     this.radialArmMs = 320;
     this.radialSize = 74;
     this.radialAccessibility = false;
+    this.cameraSnapOnSelect = true;
+    this.minimapPanEnabled = true;
+    this.stickyBuildMode = false;
     this.saveLaneMode();
     this.saveUiFeedbackEnabled();
     this.saveRadialSettings();
+    this.saveGameplaySettings();
   }
 
   private initMobileHint(): void {
@@ -201,7 +224,7 @@ export class InputHandler {
           this.selectedBuilding = null;
         } else {
           this.selectedBuilding = BuildingType.HarvesterHut;
-          this.panToHutArea();
+          if (this.cameraSnapOnSelect) this.panToHutArea();
         }
         return;
       }
@@ -246,7 +269,7 @@ export class InputHandler {
           this.selectedBuilding = null;
         } else {
           this.selectedBuilding = item.type;
-          this.panToBuildArea(item.type);
+          if (this.cameraSnapOnSelect) this.panToBuildArea(item.type);
         }
         return;
       }
@@ -326,7 +349,7 @@ export class InputHandler {
         const rect = this.canvas.getBoundingClientRect();
         const hit = this.currentRenderer.minimapHitTest(e.clientX - rect.left, e.clientY - rect.top);
         if (hit) {
-          this.camera.panTo(hit.worldX, hit.worldY);
+          if (this.minimapPanEnabled) this.camera.panTo(hit.worldX, hit.worldY);
           return;
         }
       }
@@ -374,7 +397,7 @@ export class InputHandler {
       // Miner hut: click anywhere on map to confirm auto-placement
       if (this.selectedBuilding === BuildingType.HarvesterHut) {
         this.game.sendCommand({ type: 'build_hut', playerId: this.pid });
-        if (!e.shiftKey) {
+        if (!e.shiftKey && !this.stickyBuildMode) {
           this.selectedBuilding = null;
         }
         return;
@@ -388,7 +411,7 @@ export class InputHandler {
           buildingType: this.selectedBuilding, gridX: slot.gx, gridY: slot.gy,
           ...(slot.isAlley ? { gridType: 'alley' as const } : {}),
         });
-        if (!e.shiftKey) {
+        if (!e.shiftKey && !this.stickyBuildMode) {
           this.selectedBuilding = null;
         }
       }
@@ -454,8 +477,8 @@ export class InputHandler {
     if (type === BuildingType.Tower) {
       const team = this.game.state.players[this.pid]?.team ?? Team.Bottom;
       const alley = getTeamAlleyOrigin(team, this.game.state.mapDef);
-      const cx = (alley.x + SHARED_ALLEY_COLS / 2) * TILE_SIZE;
-      const cy = (alley.y + SHARED_ALLEY_ROWS / 2) * TILE_SIZE;
+      const cx = (alley.x + this.game.state.mapDef.towerAlleyCols / 2) * TILE_SIZE;
+      const cy = (alley.y + this.game.state.mapDef.towerAlleyRows / 2) * TILE_SIZE;
       this.camera.panTo(cx, cy, 1.8);
     } else {
       const origin = getBuildGridOrigin(this.pid, this.game.state.mapDef);
@@ -482,7 +505,7 @@ export class InputHandler {
       const team = this.game.state.players[playerId]?.team ?? Team.Bottom;
       const alley = getTeamAlleyOrigin(team, this.game.state.mapDef);
       const agx = tx - alley.x, agy = ty - alley.y;
-      if (agx >= 0 && agx < SHARED_ALLEY_COLS && agy >= 0 && agy < SHARED_ALLEY_ROWS) {
+      if (agx >= 0 && agx < this.game.state.mapDef.towerAlleyCols && agy >= 0 && agy < this.game.state.mapDef.towerAlleyRows) {
         return { gx: agx, gy: agy, isAlley: true };
       }
     }
@@ -862,7 +885,7 @@ export class InputHandler {
       const sr = this.getSettingsButtonRect();
       const sx = sr.x + sr.w - 200;
       const sy = sr.y + sr.h + 4;
-      if (cx < sx || cx >= sx + 200 || cy < sy || cy >= sy + 226) {
+      if (cx < sx || cx >= sx + 200 || cy < sy || cy >= sy + 322) {
         this.settingsOpen = false;
         return true;
       }
@@ -871,8 +894,7 @@ export class InputHandler {
         this.settingsOpen = false;
         return true;
       }
-      if (cx >= sx && cx < sx + 200 && cy >= sy && cy < sy + 226) {
-        // lane mode row button
+      if (cx >= sx && cx < sx + 200 && cy >= sy && cy < sy + 322) {
         if (cy >= sy + 34 && cy < sy + 58) {
           this.laneToggleMode = this.laneToggleMode === 'double' ? 'single' : 'double';
           this.saveLaneMode();
@@ -882,18 +904,30 @@ export class InputHandler {
           this.saveUiFeedbackEnabled();
         }
         if (cy >= sy + 98 && cy < sy + 122) {
+          this.cameraSnapOnSelect = !this.cameraSnapOnSelect;
+          this.saveGameplaySettings();
+        }
+        if (cy >= sy + 130 && cy < sy + 154) {
+          this.minimapPanEnabled = !this.minimapPanEnabled;
+          this.saveGameplaySettings();
+        }
+        if (cy >= sy + 162 && cy < sy + 186) {
+          this.stickyBuildMode = !this.stickyBuildMode;
+          this.saveGameplaySettings();
+        }
+        if (cy >= sy + 194 && cy < sy + 218) {
           this.radialArmMs = this.radialArmMs >= 500 ? 240 : this.radialArmMs + 40;
           this.saveRadialSettings();
         }
-        if (cy >= sy + 130 && cy < sy + 154) {
+        if (cy >= sy + 226 && cy < sy + 250) {
           this.radialSize = this.radialSize >= 110 ? 60 : this.radialSize + 8;
           this.saveRadialSettings();
         }
-        if (cy >= sy + 162 && cy < sy + 186) {
+        if (cy >= sy + 258 && cy < sy + 282) {
           this.radialAccessibility = !this.radialAccessibility;
           this.saveRadialSettings();
         }
-        if (cy >= sy + 194 && cy < sy + 218) {
+        if (cy >= sy + 290 && cy < sy + 314) {
           this.resetUiDefaults();
         }
         return true;
@@ -910,7 +944,7 @@ export class InputHandler {
           this.selectedBuilding = null;
         } else {
           this.selectedBuilding = BuildingType.HarvesterHut;
-          this.panToHutArea();
+          if (this.cameraSnapOnSelect) this.panToHutArea();
         }
       } else if (colIdx >= 1 && colIdx <= BUILD_TRAY.length) {
         const item = BUILD_TRAY[colIdx - 1];
@@ -920,7 +954,7 @@ export class InputHandler {
           this.selectedBuilding = null;
         } else {
           this.selectedBuilding = item.type;
-          this.panToBuildArea(item.type);
+          if (this.cameraSnapOnSelect) this.panToBuildArea(item.type);
         }
       } else if (colIdx === BUILD_TRAY.length + 1) {
         if (player.nukeAvailable) {
@@ -1243,9 +1277,9 @@ export class InputHandler {
       const sx = sr.x + sr.w - 200;
       const sy = sr.y + sr.h + 4;
       // Settings container - WoodTable 9-slice
-      if (!this.ui.drawWoodTable(ctx, sx, sy, 200, 226)) {
+      if (!this.ui.drawWoodTable(ctx, sx, sy, 200, 322)) {
         ctx.fillStyle = 'rgba(0,0,0,0.88)';
-        ctx.fillRect(sx, sy, 200, 226);
+        ctx.fillRect(sx, sy, 200, 322);
       }
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px monospace';
@@ -1281,10 +1315,10 @@ export class InputHandler {
       ctx.strokeRect(sx + 8, sy + 98, 184, 24);
       ctx.fillStyle = '#90caf9';
       ctx.font = 'bold 12px monospace';
-      ctx.fillText(`Hold Delay: ${this.radialArmMs}ms`, sx + 16, sy + 114);
+      ctx.fillText(`Camera Snap: ${this.cameraSnapOnSelect ? 'on' : 'off'}`, sx + 16, sy + 114);
       ctx.fillStyle = '#8fa7bf';
       ctx.font = '10px monospace';
-      ctx.fillText('Long-press time before radial opens', sx + 8, sy + 127);
+      ctx.fillText('Jump to build area when selecting builders', sx + 8, sy + 127);
 
       ctx.fillStyle = 'rgba(20,20,20,0.9)';
       ctx.fillRect(sx + 8, sy + 130, 184, 24);
@@ -1292,10 +1326,10 @@ export class InputHandler {
       ctx.strokeRect(sx + 8, sy + 130, 184, 24);
       ctx.fillStyle = '#90caf9';
       ctx.font = 'bold 12px monospace';
-      ctx.fillText(`Radial Size: ${this.radialSize}`, sx + 16, sy + 146);
+      ctx.fillText(`Minimap Pan: ${this.minimapPanEnabled ? 'on' : 'off'}`, sx + 16, sy + 146);
       ctx.fillStyle = '#8fa7bf';
       ctx.font = '10px monospace';
-      ctx.fillText('Bigger ring + farther option labels', sx + 8, sy + 159);
+      ctx.fillText('Allow minimap clicks to move the camera', sx + 8, sy + 159);
 
       ctx.fillStyle = 'rgba(20,20,20,0.9)';
       ctx.fillRect(sx + 8, sy + 162, 184, 24);
@@ -1303,18 +1337,51 @@ export class InputHandler {
       ctx.strokeRect(sx + 8, sy + 162, 184, 24);
       ctx.fillStyle = '#90caf9';
       ctx.font = 'bold 12px monospace';
-      ctx.fillText(`Radial A11y: ${this.radialAccessibility ? 'on' : 'off'}`, sx + 16, sy + 178);
+      ctx.fillText(`Sticky Build: ${this.stickyBuildMode ? 'on' : 'off'}`, sx + 16, sy + 178);
       ctx.fillStyle = '#8fa7bf';
       ctx.font = '10px monospace';
-      ctx.fillText('High contrast + larger chat labels', sx + 8, sy + 191);
+      ctx.fillText('Keep build mode active after placing', sx + 8, sy + 191);
 
       ctx.fillStyle = 'rgba(20,20,20,0.9)';
       ctx.fillRect(sx + 8, sy + 194, 184, 24);
-      ctx.strokeStyle = '#ffcc80';
+      ctx.strokeStyle = '#90caf9';
       ctx.strokeRect(sx + 8, sy + 194, 184, 24);
+      ctx.fillStyle = '#90caf9';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(`Hold Delay: ${this.radialArmMs}ms`, sx + 16, sy + 210);
+      ctx.fillStyle = '#8fa7bf';
+      ctx.font = '10px monospace';
+      ctx.fillText('Long-press time before radial opens', sx + 8, sy + 223);
+
+      ctx.fillStyle = 'rgba(20,20,20,0.9)';
+      ctx.fillRect(sx + 8, sy + 226, 184, 24);
+      ctx.strokeStyle = '#90caf9';
+      ctx.strokeRect(sx + 8, sy + 226, 184, 24);
+      ctx.fillStyle = '#90caf9';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(`Radial Size: ${this.radialSize}`, sx + 16, sy + 242);
+      ctx.fillStyle = '#8fa7bf';
+      ctx.font = '10px monospace';
+      ctx.fillText('Bigger ring + farther option labels', sx + 8, sy + 255);
+
+      ctx.fillStyle = 'rgba(20,20,20,0.9)';
+      ctx.fillRect(sx + 8, sy + 258, 184, 24);
+      ctx.strokeStyle = '#90caf9';
+      ctx.strokeRect(sx + 8, sy + 258, 184, 24);
+      ctx.fillStyle = '#90caf9';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(`Radial A11y: ${this.radialAccessibility ? 'on' : 'off'}`, sx + 16, sy + 274);
+      ctx.fillStyle = '#8fa7bf';
+      ctx.font = '10px monospace';
+      ctx.fillText('High contrast + larger chat labels', sx + 8, sy + 287);
+
+      ctx.fillStyle = 'rgba(20,20,20,0.9)';
+      ctx.fillRect(sx + 8, sy + 290, 184, 24);
+      ctx.strokeStyle = '#ffcc80';
+      ctx.strokeRect(sx + 8, sy + 290, 184, 24);
       ctx.fillStyle = '#ffcc80';
       ctx.font = 'bold 12px monospace';
-      ctx.fillText('Reset Defaults', sx + 16, sy + 210);
+      ctx.fillText('Reset Defaults', sx + 16, sy + 306);
     }
 
     // Building popup (in-world)
@@ -1796,8 +1863,8 @@ export class InputHandler {
     // Highlight tower alley slots (for towers)
     if (isTower) {
       const alley = getTeamAlleyOrigin(myTeam, this.game.state.mapDef);
-      for (let gy = 0; gy < SHARED_ALLEY_ROWS; gy++) {
-        for (let gx = 0; gx < SHARED_ALLEY_COLS; gx++) {
+      for (let gy = 0; gy < this.game.state.mapDef.towerAlleyRows; gy++) {
+        for (let gx = 0; gx < this.game.state.mapDef.towerAlleyCols; gx++) {
           const wx = (alley.x + gx) * TILE_SIZE;
           const wy = (alley.y + gy) * TILE_SIZE;
           const occupied = this.game.state.buildings.some(
