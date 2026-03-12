@@ -100,6 +100,24 @@ export const RACE_UPGRADE_COSTS: Record<Race, { tier1: { gold: number; wood: num
 // Keep old flat export for backwards compat
 export const UPGRADE_COSTS = RACE_UPGRADE_COSTS[Race.Crown];
 
+// Which resources a race actually uses (across buildings + upgrades)
+export function getRaceUsedResources(race: Race): { gold: boolean; wood: boolean; stone: boolean } {
+  const costs = RACE_BUILDING_COSTS[race];
+  const upgrades = RACE_UPGRADE_COSTS[race];
+  let gold = false, wood = false, stone = false;
+  for (const c of Object.values(costs)) {
+    if (c.gold > 0) gold = true;
+    if (c.wood > 0) wood = true;
+    if (c.stone > 0) stone = true;
+  }
+  for (const t of [upgrades.tier1, upgrades.tier2]) {
+    if (t.gold > 0) gold = true;
+    if (t.wood > 0) wood = true;
+    if (t.stone > 0) stone = true;
+  }
+  return { gold, wood, stone };
+}
+
 // Escalating hut cost
 export function HARVESTER_HUT_COST(hutIndex: number): number {
   return Math.floor(50 * Math.pow(1.35, hutIndex));

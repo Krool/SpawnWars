@@ -1,6 +1,6 @@
 import { Camera } from '../rendering/Camera';
 import { UIAssets } from '../rendering/UIAssets';
-import { SpriteLoader, drawSpriteFrame } from '../rendering/SpriteLoader';
+import { SpriteLoader, drawSpriteFrame, getSpriteFrame } from '../rendering/SpriteLoader';
 import { GameState, BuildingType, BuildingState, TILE_SIZE, Race } from '../simulation/types';
 import { UPGRADE_TREES, RACE_UPGRADE_COSTS, UNIT_STATS, TOWER_STATS, getBuildingCost, type UpgradeNodeDef } from '../simulation/data';
 import { getUnitUpgradeMultipliers } from '../simulation/GameState';
@@ -390,7 +390,7 @@ export class BuildingPopup {
       const sprData = sprites.getUnitSprite(race, category, building.playerId, false, opt.choice);
       if (sprData) {
         const [img, def] = sprData;
-        const frame = Math.floor(this.animTick / 8) % def.cols;
+        const frame = getSpriteFrame(Math.floor(this.animTick / 3), def);
         const aspect = def.frameW / def.frameH;
         const dh = spriteSize * tierScale;
         const dw = dh * aspect;

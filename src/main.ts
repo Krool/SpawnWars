@@ -14,6 +14,7 @@ import { getMapById } from './simulation/maps';
 import { ProfileScene } from './profile/ProfileScene';
 import { loadProfile, updateProfileFromMatch, ACHIEVEMENTS } from './profile/ProfileData';
 import { SoundManager } from './audio/SoundManager';
+import { MusicPlayer } from './audio/MusicPlayer';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 if (!canvas) throw new Error('Canvas element not found');
@@ -37,15 +38,18 @@ uiReady.then(() => {
   const toastSfx = new SoundManager();
   manager.setOnToastShow(() => toastSfx.playAchievement());
 
+  // Shared music player for mp3 tracks (menu, race select, combat)
+  const musicPlayer = new MusicPlayer();
+
   const profile = loadProfile();
-  const titleScene = new TitleScene(manager, canvas, sharedUI, sharedSprites);
+  const titleScene = new TitleScene(manager, canvas, sharedUI, sharedSprites, musicPlayer);
   titleScene.profile = profile;
   const postMatchScene = new PostMatchScene(manager, canvas, sharedUI);
 
   // Track selected race between scenes
   let selectedRace: Race = Race.Crown;
 
-  const matchScene = new MatchScene(canvas, sharedUI, (game) => {
+  const matchScene = new MatchScene(canvas, sharedUI, musicPlayer, (game) => {
     recordMatch(game.state);
     const newAch = updateProfileFromMatch(profile, game.state, game.playerSlot);
     for (const achId of newAch) {
@@ -73,7 +77,7 @@ uiReady.then(() => {
     manager.switchTo('title');
   });
 
-  const raceSelectScene = new RaceSelectScene(manager, canvas, sharedSprites, sharedUI, (race) => {
+  const raceSelectScene = new RaceSelectScene(manager, canvas, sharedSprites, sharedUI, musicPlayer, (race) => {
     selectedRace = race;
     manager.switchTo('difficultySelect');
   });

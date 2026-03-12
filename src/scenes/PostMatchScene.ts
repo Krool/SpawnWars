@@ -60,7 +60,7 @@ export class PostMatchScene implements Scene {
 
     this.canvas.addEventListener('click', this.clickHandler);
     window.addEventListener('keydown', this.keyHandler);
-    this.canvas.addEventListener('touchstart', this.touchHandler);
+    this.canvas.addEventListener('touchstart', this.touchHandler, { passive: false });
   }
 
   exit(): void {
@@ -153,26 +153,27 @@ export class PostMatchScene implements Scene {
     const innerW = innerR - innerL;
 
     // Player stats table
+    const tableFontSize = fontSize * 0.7;
     const tableY = panelY + 48;
-    const rowH = fontSize * 2.0;
+    const rowH = tableFontSize * 2.4;
     // Columns positioned relative to inner area
     const colX = [
       innerL,                    // PLAYER (left-aligned)
-      innerL + innerW * 0.28,   // gold
-      innerL + innerW * 0.40,   // wood
-      innerL + innerW * 0.52,   // stone
-      innerL + innerW * 0.64,   // spawned
-      innerL + innerW * 0.76,   // killed
+      innerL + innerW * 0.32,   // gold
+      innerL + innerW * 0.44,   // wood
+      innerL + innerW * 0.55,   // stone
+      innerL + innerW * 0.66,   // spawned
+      innerL + innerW * 0.78,   // killed
       innerL + innerW * 0.92,   // damage
     ];
 
     // Header row with icons
-    ctx.font = `bold ${fontSize * 0.75}px monospace`;
+    ctx.font = `bold ${tableFontSize * 0.85}px monospace`;
     ctx.fillStyle = '#3e2c1a';
     ctx.textAlign = 'left';
     ctx.fillText('PLAYER', colX[0], tableY);
     ctx.textAlign = 'right';
-    const hdrIconSz = fontSize * 0.9;
+    const hdrIconSz = tableFontSize * 1.05;
     this.ui.drawIcon(ctx, 'gold', colX[1] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
     this.ui.drawIcon(ctx, 'wood', colX[2] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
     this.ui.drawIcon(ctx, 'meat', colX[3] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
@@ -190,14 +191,17 @@ export class PostMatchScene implements Scene {
     ctx.stroke();
 
     const pStats = state.playerStats ?? [];
+    let rowIdx = 0;
     for (let i = 0; i < state.players.length; i++) {
       const p = state.players[i];
+      if (p.isEmpty) continue;
       const ps = pStats[i];
-      const y = tableY + (i + 1) * rowH;
+      rowIdx++;
+      const y = tableY + rowIdx * rowH;
       const rowTop = y - rowH * 0.65;
 
       // Alternating row backgrounds
-      if (i % 2 === 0) {
+      if (rowIdx % 2 === 0) {
         ctx.fillStyle = 'rgba(62,44,26,0.08)';
         ctx.fillRect(innerL, rowTop, innerW, rowH);
       }
@@ -207,15 +211,38 @@ export class PostMatchScene implements Scene {
         ctx.fillRect(innerL, rowTop, innerW, rowH);
       }
 
-      const raceStr = p.race.charAt(0).toUpperCase() + p.race.slice(1);
+      const isBot = !!this.stats?.slotBotDifficulties?.[String(i)];
+      const raceColor = RACE_COLORS[p.race]?.primary ?? '#888';
+      const iconSz = tableFontSize * 1.0;
+      let textX = colX[0];
+
+      // Bot indicator icon (gear)
+      if (isBot) {
+        this.ui.drawIcon(ctx, 'settings', textX, y - iconSz + 2, iconSz);
+        textX += iconSz + 2;
+      }
+
+      // Race color dot
+      ctx.fillStyle = raceColor;
+      const dotR = tableFontSize * 0.32;
+      ctx.beginPath();
+      ctx.arc(textX + dotR, y - dotR + 1, dotR, 0, Math.PI * 2);
+      ctx.fill();
+      textX += dotR * 2 + 4;
+
+      // Player name — truncate to fit column
       const label = this.slotLabel(i);
-      ctx.font = `bold ${fontSize * 0.8}px monospace`;
+      const raceStr = p.race.charAt(0).toUpperCase() + p.race.slice(1);
+      const fullText = `${label} ${raceStr}`;
+      ctx.font = `bold ${tableFontSize}px monospace`;
+      const maxTextW = colX[1] - textX - hdrIconSz - 4;
+      const truncated = this.truncateText(ctx, fullText, maxTextW);
       ctx.textAlign = 'left';
       const pc = PLAYER_COLORS[i];
       ctx.fillStyle = this.darkenColor(pc, 0.6);
-      ctx.fillText(`${label} ${raceStr}`, colX[0], y);
+      ctx.fillText(truncated, textX, y);
 
-      ctx.font = `${fontSize * 0.8}px monospace`;
+      ctx.font = `${tableFontSize}px monospace`;
       ctx.fillStyle = '#2a1e10';
       ctx.textAlign = 'right';
       ctx.fillText(`${ps?.totalGoldEarned ?? 0}`, colX[1], y);
@@ -223,12 +250,12 @@ export class PostMatchScene implements Scene {
       ctx.fillText(`${ps?.totalStoneEarned ?? 0}`, colX[3], y);
       ctx.fillText(`${ps?.unitsSpawned ?? 0}`, colX[4], y);
       ctx.fillText(`${ps?.unitsLost ?? 0}`, colX[5], y);
-      ctx.font = `bold ${fontSize * 0.8}px monospace`;
+      ctx.font = `bold ${tableFontSize}px monospace`;
       ctx.fillText(`${ps?.totalDamageDealt ?? 0}`, colX[6], y);
     }
 
     // HQ HP with bar sprites
-    const hqY = tableY + (state.players.length + 1.5) * rowH;
+    const hqY = tableY + (rowIdx + 1.5) * rowH;
     ctx.font = `bold ${fontSize}px monospace`;
     ctx.textAlign = 'center';
     ctx.fillStyle = '#3e2c1a';
@@ -326,6 +353,14 @@ export class PostMatchScene implements Scene {
     const diff = this.stats?.slotBotDifficulties?.[String(slotId)];
     if (diff) return `Bot ${diff.charAt(0).toUpperCase() + diff.slice(1)}`;
     return `P${slotId + 1}`;
+  }
+
+  /** Truncate text to fit within maxWidth, adding ellipsis if needed. */
+  private truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + '…').width > maxWidth) t = t.slice(0, -1);
+    return t + '…';
   }
 
   /** Darken a hex color by multiplying RGB channels by factor (0–1). */

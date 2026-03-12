@@ -1,5 +1,5 @@
 import { Scene, SceneManager } from './Scene';
-import { SpriteLoader, drawSpriteFrame } from '../rendering/SpriteLoader';
+import { SpriteLoader, drawSpriteFrame, getSpriteFrame } from '../rendering/SpriteLoader';
 import { UIAssets } from '../rendering/UIAssets';
 import { Race, BuildingType, TILE_SIZE } from '../simulation/types';
 import { UNIT_STATS, RACE_COLORS, UPGRADE_TREES, UpgradeNodeDef } from '../simulation/data';
@@ -250,8 +250,7 @@ export class UnitGalleryScene implements Scene {
           const drawY = feetY - drawH * gY;
 
           // Animate
-          const ticksPerFrame = Math.max(1, Math.round(20 / def.cols));
-          const frame = Math.floor(tick / ticksPerFrame) % def.cols;
+          const frame = getSpriteFrame(tick, def);
 
           // Drop shadow
           ctx.fillStyle = 'rgba(0,0,0,0.25)';

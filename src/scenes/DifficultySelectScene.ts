@@ -227,7 +227,7 @@ export class DifficultySelectScene implements Scene {
     window.addEventListener('keydown', this.keyHandler);
     this.canvas.addEventListener('click', this.clickHandler);
     this.canvas.addEventListener('mousemove', this.moveHandler);
-    this.canvas.addEventListener('touchstart', this.touchHandler);
+    this.canvas.addEventListener('touchstart', this.touchHandler, { passive: false });
   }
 
   exit(): void {

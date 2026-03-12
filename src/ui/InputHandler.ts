@@ -6,10 +6,10 @@ import {
   HarvesterAssignment, Team, Race, UnitState,
 } from '../simulation/types';
 import { getBuildGridOrigin, getTeamAlleyOrigin, getHutGridOrigin } from '../simulation/GameState';
-import { RACE_BUILDING_COSTS, UNIT_STATS, TOWER_STATS, RACE_COLORS } from '../simulation/data';
+import { RACE_BUILDING_COSTS, UNIT_STATS, TOWER_STATS, RACE_COLORS, getRaceUsedResources } from '../simulation/data';
 import { TICK_RATE } from '../simulation/types';
 import { UIAssets } from '../rendering/UIAssets';
-import { SpriteLoader, drawSpriteFrame } from '../rendering/SpriteLoader';
+import { SpriteLoader, drawSpriteFrame, getSpriteFrame } from '../rendering/SpriteLoader';
 import { BuildingPopup } from './BuildingPopup';
 
 interface BuildTrayItem {
@@ -535,12 +535,20 @@ export class InputHandler {
     this.selectedUnitId = null;
     this.selectedBuildingId = building.id;
 
-    // Click on hut: cycle harvester assignment
+    // Click on hut: cycle harvester assignment (skip resources the race doesn't use)
     if (building.type === BuildingType.HarvesterHut) {
       const h = this.game.state.harvesters.find(h => h.hutId === building.id);
       if (h) {
-        const curIdx = ASSIGNMENT_CYCLE.indexOf(h.assignment);
-        const nextAssignment = ASSIGNMENT_CYCLE[(curIdx + 1) % ASSIGNMENT_CYCLE.length];
+        const player = this.game.state.players[this.pid];
+        const used = player ? getRaceUsedResources(player.race) : { gold: true, wood: true, stone: true };
+        const cycle = ASSIGNMENT_CYCLE.filter(a =>
+          a === HarvesterAssignment.Center ||
+          (a === HarvesterAssignment.BaseGold && used.gold) ||
+          (a === HarvesterAssignment.Wood && used.wood) ||
+          (a === HarvesterAssignment.Stone && used.stone)
+        );
+        const curIdx = cycle.indexOf(h.assignment);
+        const nextAssignment = cycle[(curIdx + 1) % cycle.length];
         this.game.sendCommand({
           type: 'set_hut_assignment', playerId: this.pid,
           hutId: building.id, assignment: nextAssignment,
@@ -1129,7 +1137,7 @@ export class InputHandler {
         const sprData = this.sprites?.getUnitSprite(race, spriteCategory, 0);
         if (sprData) {
           const [img, def] = sprData;
-          const frame = isSelected ? Math.floor(this.trayTick / 6) % def.cols : 0;
+          const frame = isSelected ? getSpriteFrame(Math.floor(this.trayTick / 3), def) : 0;
           const aspect = def.frameW / def.frameH;
           const dh = spriteSize;
           const dw = dh * aspect;

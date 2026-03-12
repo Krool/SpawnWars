@@ -62,6 +62,12 @@
             "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30" },
             "race": { ".validate": "newData.isString() && newData.val().length <= 20" }
           }
+        },
+        "bots": {
+          "$slot": {
+            ".write": "auth != null && data.parent().parent().child('hostUid').val() === auth.uid",
+            ".validate": "newData.isString() && newData.val().length <= 20"
+          }
         }
       }
     },

@@ -2,6 +2,7 @@ import { Scene } from './Scene';
 import { Race, type MapDef } from '../simulation/types';
 import { Game } from '../game/Game';
 import { UIAssets } from '../rendering/UIAssets';
+import { MusicPlayer } from '../audio/MusicPlayer';
 import { BotDifficultyLevel } from '../simulation/BotAI';
 import { DUEL_MAP } from '../simulation/maps';
 
@@ -30,12 +31,14 @@ export class MatchScene implements Scene {
   private selectedMap: MapDef = DUEL_MAP;
   private partyConfig: PartyConfig | null = null;
   private ui: UIAssets;
+  private musicPlayer: MusicPlayer;
   private onMatchEnd: (game: Game) => void;
   private onQuitGame: (() => void) | null = null;
 
-  constructor(canvas: HTMLCanvasElement, ui: UIAssets, onMatchEnd: (game: Game) => void) {
+  constructor(canvas: HTMLCanvasElement, ui: UIAssets, musicPlayer: MusicPlayer, onMatchEnd: (game: Game) => void) {
     this.canvas = canvas;
     this.ui = ui;
+    this.musicPlayer = musicPlayer;
     this.onMatchEnd = onMatchEnd;
   }
 
@@ -90,6 +93,12 @@ export class MatchScene implements Scene {
       this.onQuitGame?.();
     };
     this.game.start();
+
+    // Start race-themed combat music
+    const combatRace = this.partyConfig
+      ? (this.partyConfig.humanPlayers.find(h => h.slot === (this.partyConfig!.localSlot))?.race ?? Race.Crown)
+      : this.playerRace;
+    this.musicPlayer.playCombat(combatRace);
   }
 
   exit(): void {

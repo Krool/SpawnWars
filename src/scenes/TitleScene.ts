@@ -1,6 +1,6 @@
 import { Scene, SceneManager } from './Scene';
 import { UIAssets } from '../rendering/UIAssets';
-import { SpriteLoader, drawSpriteFrame, drawGridFrame } from '../rendering/SpriteLoader';
+import { SpriteLoader, drawSpriteFrame, drawGridFrame, getSpriteFrame } from '../rendering/SpriteLoader';
 import { Race, BuildingType, StatusType, StatusEffect, TICK_RATE } from '../simulation/types';
 import { UNIT_STATS, RACE_COLORS, UPGRADE_TREES } from '../simulation/data';
 import { getUnitUpgradeMultipliers } from '../simulation/GameState';
@@ -10,6 +10,7 @@ import { PlayerProfile, ALL_AVATARS, loadProfile } from '../profile/ProfileData'
 import { BotDifficultyLevel } from '../simulation/BotAI';
 import { getMapById, ALL_MAPS } from '../simulation/maps';
 import { SoundManager } from '../audio/SoundManager';
+import { MusicPlayer } from '../audio/MusicPlayer';
 import { getAudioSettings, subscribeToAudioSettings, updateAudioSettings } from '../audio/AudioSettings';
 import { drawSettingsButton, drawSettingsOverlay, getSettingsOverlayLayout, hitRect as hitOverlayRect, sliderValueFromPoint } from '../ui/SettingsOverlay';
 
@@ -681,6 +682,7 @@ export class TitleScene implements Scene {
   // Sound
   private sfx = new TitleSfx();
   private menuMusic = new SoundManager();
+  private musicPlayer: MusicPlayer;
   private audioSettings = getAudioSettings();
   private audioSettingsUnsub: (() => void) | null = null;
   private settingsOpen = false;
@@ -697,7 +699,7 @@ export class TitleScene implements Scene {
   private joinCodeInput: string = '';
   private joinInputActive = false;
   private firebaseReady = false;
-  private partyDifficultyIndex = 1; // index into PARTY_DIFFICULTY_OPTIONS (default Medium)
+  // partyDifficultyIndex removed — difficulty is per-slot via bots
   // Drag-and-drop state for party slot rearrangement
   private dragSlot = -1;  // which slot is being dragged (-1 = none)
   private dragX = 0;
@@ -713,11 +715,12 @@ export class TitleScene implements Scene {
   onLocalStart: ((setup: LocalSetup) => void) | null = null;
   private localSetup: LocalSetup | null = null;
 
-  constructor(manager: SceneManager, canvas: HTMLCanvasElement, ui: UIAssets, sprites: SpriteLoader) {
+  constructor(manager: SceneManager, canvas: HTMLCanvasElement, ui: UIAssets, sprites: SpriteLoader, musicPlayer: MusicPlayer) {
     this.manager = manager;
     this.canvas = canvas;
     this.ui = ui;
     this.sprites = sprites;
+    this.musicPlayer = musicPlayer;
     // Load persisted duel settings
     try {
       const ts = localStorage.getItem('spawnwars.duelTeamSize');
@@ -764,6 +767,7 @@ export class TitleScene implements Scene {
     const interactHandler = () => {
       this.userInteracted = true;
       this.menuMusic.startMenuMusic();
+      this.musicPlayer.playMenu();
     };
     this.clickHandler = (e: MouseEvent) => {
       interactHandler();
@@ -801,7 +805,7 @@ export class TitleScene implements Scene {
     };
     this.canvas.addEventListener('mousedown', interactHandler, { once: true });
     this.canvas.addEventListener('click', this.clickHandler);
-    this.canvas.addEventListener('touchstart', this.touchHandler);
+    this.canvas.addEventListener('touchstart', this.touchHandler, { passive: false });
     window.addEventListener('keydown', this.keyHandler);
 
     // Drag-and-drop handlers for party slot rearrangement
@@ -1020,7 +1024,7 @@ export class TitleScene implements Scene {
     const mapTogW = panelW * 0.5;
     const mapTogH = 24;
     const mapTogX = px + (panelW - mapTogW) / 2;
-    const mapTogY = py + panelH * 0.20;
+    const mapTogY = py + panelH * 0.26;
 
     // Difficulty buttons (host only, between slots and start button)
     const dbtnW = panelW * 0.18;
@@ -1041,7 +1045,7 @@ export class TitleScene implements Scene {
       slotRects,
       start: { x: px + panelW * 0.15, y: py + panelH - 56, w: panelW * 0.42, h: 44 },
       leave: { x: px + panelW * 0.60, y: py + panelH - 56, w: panelW * 0.28, h: 44 },
-      code: { x: px + panelW * 0.25, y: py + 8, w: panelW * 0.5, h: 36 },
+      code: { x: px + panelW * 0.125, y: py + 2, w: panelW * 0.75, h: 52 },
       mapToggle: { x: mapTogX, y: mapTogY, w: mapTogW, h: mapTogH },
       diffBtns,
     };
@@ -1228,16 +1232,6 @@ export class TitleScene implements Scene {
         this.party?.updateMap(newMapId);
         return;
       }
-      // Difficulty buttons (host only)
-      if (isHost) {
-        for (let i = 0; i < pl.diffBtns.length; i++) {
-          if (this.hitRect(cx, cy, pl.diffBtns[i])) {
-            this.partyDifficultyIndex = i;
-            this.party?.updateDifficulty(PARTY_DIFFICULTY_OPTIONS[i].level);
-            return;
-          }
-        }
-      }
       if (isHost && this.hitRect(cx, cy, pl.start) && getPartyPlayerCount(this.partyState) >= 2) {
         this.party?.startGame();
         return;
@@ -1293,7 +1287,7 @@ export class TitleScene implements Scene {
       return;
     }
     if (this.hitRect(cx, cy, btns.create)) {
-      this.doLocalSetup();
+      this.doCreateParty();
       return;
     }
     if (this.hitRect(cx, cy, btns.gallery)) {
@@ -1353,6 +1347,19 @@ export class TitleScene implements Scene {
       console.error('[Party] Find game failed:', e);
       this.showPartyError(e.message || 'Failed to find game');
       this.matchmaking = false;
+    }
+  }
+
+  private async doCreateParty(): Promise<void> {
+    if (this.matchmaking) return;
+    try {
+      await this.ensureFirebase();
+      this.party!.localName = this.playerName;
+      await this.party!.createParty(Race.Crown);
+      // partyListener will set this.partyState → shows party panel with code
+    } catch (e: any) {
+      console.error('[Party] Create party failed:', e);
+      this.showPartyError(e.message || 'Failed to create party');
     }
   }
 
@@ -1720,7 +1727,7 @@ export class TitleScene implements Scene {
     // Draw units — feet anchored ON the ground line
     const unitSize = Math.max(48, Math.min(w / 6, 80));
     const unitBaseY = groundY;
-    const frameTick = Math.floor(this.animTime * 7);
+    const frameTick = Math.floor(this.animTime * 20);
 
     // Draw dead units (fading) first, then living
     if (this.deadUnits.length > 0 && this.deathFade > 0) {
@@ -2069,9 +2076,7 @@ export class TitleScene implements Scene {
         const sprData = this.sprites.getUnitSprite(avatarDef.race, avatarDef.category, 0);
         if (sprData) {
           const [img, def] = sprData;
-          const tick = Math.floor(this.pulseTime / 50);
-          const ticksPerFrame = Math.max(1, Math.round(20 / def.cols));
-          const frame = Math.floor(tick / ticksPerFrame) % def.cols;
+          const frame = getSpriteFrame(Math.floor(this.pulseTime / 50), def);
           const aspect = def.frameW / def.frameH;
           const sprInset = 4;
           const sprSize = avatarSize - sprInset * 2;
@@ -2305,7 +2310,7 @@ export class TitleScene implements Scene {
           const spriteData = this.sprites.getUnitSprite(botRace as Race, 'melee', i);
           if (spriteData) {
             const [img, def] = spriteData;
-            const frame = Math.floor(this.animTime * 5) % def.cols;
+            const frame = getSpriteFrame(Math.floor(this.animTime * 20), def);
             const gY = def.groundY ?? 0.71;
             const drawY = slotRect.y + slotRect.h - iconSize * gY;
             drawSpriteFrame(ctx, img, def, frame, slotCx - iconSize / 2, drawY, iconSize, iconSize);
@@ -2374,7 +2379,7 @@ export class TitleScene implements Scene {
         const spriteData = this.sprites.getUnitSprite(dragRace, 'melee', this.dragSlot < playersPerTeam ? 0 : 1);
         if (spriteData) {
           const [img, def] = spriteData;
-          const frame = Math.floor(this.animTime * 5) % def.cols;
+          const frame = getSpriteFrame(Math.floor(this.animTime * 20), def);
           const gY = def.groundY ?? 0.71;
           drawSpriteFrame(ctx, img, def, frame, this.dragX - ghostSize / 2, this.dragY - ghostSize * gY, ghostSize, ghostSize);
         }
@@ -2441,24 +2446,35 @@ export class TitleScene implements Scene {
     const fontSize = Math.max(10, Math.min(pl.panel.w / 28, 15));
     const isHost = this.party?.isHost;
 
-    // Header ribbon with invite code
-    const codeRibW = pl.panel.w * 0.6;
-    const codeRibH = 32;
+    // Big ribbon header with party code front-and-center
+    const codeRibW = pl.panel.w * 0.75;
+    const codeRibH = 52;
     const codeRibX = pl.panel.x + (pl.panel.w - codeRibW) / 2;
-    const codeRibY = pl.panel.y + 8;
-    this.ui.drawSmallRibbon(ctx, codeRibX, codeRibY, codeRibW, codeRibH, 2); // yellow
-    ctx.font = `bold ${Math.max(11, codeRibH * 0.42)}px monospace`;
+    const codeRibY = pl.panel.y + 2;
+    this.ui.drawBigRibbon(ctx, codeRibX, codeRibY, codeRibW, codeRibH, 2); // yellow
+
+    // "PARTY CODE" small label at top of ribbon
+    const labelSize = Math.max(8, codeRibH * 0.2);
+    ctx.font = `bold ${labelSize}px monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillText('PARTY CODE', w / 2, codeRibY + codeRibH * 0.25);
+
+    // Large code text — letter-spaced, bright white on the ribbon
+    const codeFontSize = Math.max(20, Math.min(pl.panel.w / 10, 36));
+    const codeStr = ps.code.split('').join('  ');
+    ctx.font = `bold ${codeFontSize}px monospace`;
+    const codeTxtY = codeRibY + codeRibH * 0.6;
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillText(`PARTY  ${ps.code}`, w / 2 + 1, codeRibY + codeRibH * 0.5 + 1);
+    ctx.fillText(codeStr, w / 2 + 1, codeTxtY + 1);
     ctx.fillStyle = '#fff';
-    ctx.fillText(`PARTY  ${ps.code}`, w / 2, codeRibY + codeRibH * 0.5);
+    ctx.fillText(codeStr, w / 2, codeTxtY);
 
     // Tap to copy hint
     ctx.font = `${Math.max(8, fontSize * 0.7)}px monospace`;
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.fillText('click code to copy', w / 2, codeRibY + codeRibH + 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fillText('tap code to copy', w / 2, codeRibY + codeRibH + 8);
 
     // Map toggle (host only)
     {
@@ -2613,7 +2629,7 @@ export class TitleScene implements Scene {
         const spriteData = this.sprites.getUnitSprite(dragPlayer.race, 'melee', this.dragSlot < playersPerTeam ? 0 : 1);
         if (spriteData) {
           const [img, def] = spriteData;
-          const frame = Math.floor(this.animTime * 5) % def.cols;
+          const frame = getSpriteFrame(Math.floor(this.animTime * 20), def);
           const gY = def.groundY ?? 0.71;
           drawSpriteFrame(ctx, img, def, frame, this.dragX - ghostSize / 2, this.dragY - ghostSize * gY, ghostSize, ghostSize);
         }
@@ -2621,58 +2637,6 @@ export class TitleScene implements Scene {
         ctx.textAlign = 'center';
         ctx.fillStyle = '#fff';
         ctx.fillText(dragPlayer.name, this.dragX, this.dragY + ghostSize * 0.4);
-        ctx.globalAlpha = 1;
-      }
-    }
-
-    // Difficulty selector (host sees buttons, guest sees label)
-    {
-      const diffY = pl.diffBtns[0].y;
-      const diffLabelSize = Math.max(7, fontSize * 0.65);
-      ctx.font = `${diffLabelSize}px monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
-      ctx.fillText('DIFFICULTY', w / 2, diffY - 4);
-
-      // Read from party state if guest, local index if host
-      const activeIdx = isHost
-        ? this.partyDifficultyIndex
-        : PARTY_DIFFICULTY_OPTIONS.findIndex(d => d.level === (ps.difficulty ?? BotDifficultyLevel.Medium));
-      const resolvedIdx = activeIdx >= 0 ? activeIdx : 1;
-
-      for (let i = 0; i < PARTY_DIFFICULTY_OPTIONS.length; i++) {
-        const d = PARTY_DIFFICULTY_OPTIONS[i];
-        const b = pl.diffBtns[i];
-        const isSel = i === resolvedIdx;
-
-        ctx.fillStyle = isSel ? d.color : 'rgba(0,0,0,0.3)';
-        const r = 3;
-        ctx.beginPath();
-        ctx.moveTo(b.x + r, b.y);
-        ctx.lineTo(b.x + b.w - r, b.y);
-        ctx.arcTo(b.x + b.w, b.y, b.x + b.w, b.y + r, r);
-        ctx.lineTo(b.x + b.w, b.y + b.h - r);
-        ctx.arcTo(b.x + b.w, b.y + b.h, b.x + b.w - r, b.y + b.h, r);
-        ctx.lineTo(b.x + r, b.y + b.h);
-        ctx.arcTo(b.x, b.y + b.h, b.x, b.y + b.h - r, r);
-        ctx.lineTo(b.x, b.y + r);
-        ctx.arcTo(b.x, b.y, b.x + r, b.y, r);
-        ctx.closePath();
-        ctx.fill();
-
-        if (!isSel) {
-          ctx.strokeStyle = d.color;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        }
-
-        // Only host can click, dim for guest
-        if (!isHost && !isSel) ctx.globalAlpha = 0.4;
-        const lblSize = Math.max(7, Math.min(b.w / 5, 10));
-        ctx.font = `bold ${lblSize}px monospace`;
-        ctx.textAlign = 'center';
-        ctx.fillStyle = isSel ? '#000' : d.color;
-        ctx.fillText(d.label, b.x + b.w / 2, b.y + b.h / 2 + lblSize * 0.35);
         ctx.globalAlpha = 1;
       }
     }
@@ -2733,7 +2697,7 @@ export class TitleScene implements Scene {
       if (spriteData) {
         const [img, def] = spriteData;
         const iconSize = Math.min(raceRect.w, raceRect.h);
-        const frame = Math.floor(this.animTime * 5) % def.cols;
+        const frame = getSpriteFrame(Math.floor(this.animTime * 20), def);
         const gY = def.groundY ?? 0.71;
         const drawY = raceRect.y + raceRect.h - iconSize * gY;
         drawSpriteFrame(ctx, img, def, frame, cx - iconSize / 2, drawY, iconSize, iconSize);
@@ -2838,7 +2802,7 @@ export class TitleScene implements Scene {
     const scaledSize = size * spriteScale;
     const drawW = scaledSize;
     const drawH = scaledSize * (def.heightScale ?? 1.0);
-    const frame = frameTick % def.cols;
+    const frame = getSpriteFrame(frameTick, def);
     const sx = this.tileToScreen(unit.x, screenW);
     const gY = def.groundY ?? 0.71;
     const drawY = baseY - drawH * gY;

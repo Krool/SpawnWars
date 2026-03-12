@@ -1,9 +1,10 @@
 import { Scene, SceneManager } from './Scene';
 import { Race } from '../simulation/types';
 import { RACE_COLORS } from '../simulation/data';
-import { SpriteLoader, drawSpriteFrame } from '../rendering/SpriteLoader';
+import { SpriteLoader, drawSpriteFrame, getSpriteFrame } from '../rendering/SpriteLoader';
 import { UIAssets } from '../rendering/UIAssets';
 import { SoundManager } from '../audio/SoundManager';
+import { MusicPlayer } from '../audio/MusicPlayer';
 import { getAudioSettings, subscribeToAudioSettings, updateAudioSettings } from '../audio/AudioSettings';
 import { drawSettingsButton, drawSettingsOverlay, getSettingsOverlayLayout, hitRect, sliderValueFromPoint } from '../ui/SettingsOverlay';
 
@@ -57,6 +58,7 @@ export class RaceSelectScene implements Scene {
   private sceneAge = 0;
   private settingsOpen = false;
   private music = new SoundManager();
+  private musicPlayer: MusicPlayer;
   private audioSettings = getAudioSettings();
   private audioSettingsUnsub: (() => void) | null = null;
 
@@ -65,11 +67,12 @@ export class RaceSelectScene implements Scene {
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private touchHandler: ((e: TouchEvent) => void) | null = null;
 
-  constructor(manager: SceneManager, canvas: HTMLCanvasElement, sprites: SpriteLoader, ui: UIAssets, onConfirm: (race: Race) => void) {
+  constructor(manager: SceneManager, canvas: HTMLCanvasElement, sprites: SpriteLoader, ui: UIAssets, musicPlayer: MusicPlayer, onConfirm: (race: Race) => void) {
     this.manager = manager;
     this.canvas = canvas;
     this.sprites = sprites;
     this.ui = ui;
+    this.musicPlayer = musicPlayer;
     this.onConfirm = onConfirm;
   }
 
@@ -93,6 +96,7 @@ export class RaceSelectScene implements Scene {
 
     const raceForMusic = this.selectedIndex < RACES.length ? RACES[this.selectedIndex].race : Race.Crown;
     this.music.startRaceSelectMusic(raceForMusic);
+    this.musicPlayer.playRaceSelect();
 
     this.keyHandler = (e) => {
       const prevIndex = this.selectedIndex;
@@ -172,7 +176,7 @@ export class RaceSelectScene implements Scene {
     window.addEventListener('keydown', this.keyHandler);
     this.canvas.addEventListener('click', this.clickHandler);
     this.canvas.addEventListener('mousemove', this.moveHandler);
-    this.canvas.addEventListener('touchstart', this.touchHandler);
+    this.canvas.addEventListener('touchstart', this.touchHandler, { passive: false });
   }
 
   exit(): void {
@@ -387,7 +391,7 @@ export class RaceSelectScene implements Scene {
         const hScale = def.heightScale ?? 1.0;
         const drawW = aspect >= 1 ? fitSize : fitSize * aspect;
         const drawH = (aspect >= 1 ? fitSize / aspect : fitSize) * hScale;
-        const frame = isSelected ? Math.floor(this.tick / 6) % def.cols : 0;
+        const frame = isSelected ? getSpriteFrame(Math.floor(this.tick / 3), def) : 0;
         const slotCx = box.x + spriteSlotW * (ui + 0.5);
         const dx = Math.round(slotCx - drawW / 2);
         const dy = Math.round(spriteBaseY - drawH * (def.groundY ?? 0.71));

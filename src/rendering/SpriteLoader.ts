@@ -361,6 +361,17 @@ export interface SpriteDef {
   groundY?: number;  // where the feet/ground contact is as fraction of frame height (0=top, 1=bottom)
   scale?: number;    // optional display scale multiplier (default 1.0)
   heightScale?: number; // squash/stretch height independently of width (default 1.0)
+  animSpeed?: number;  // animation speed multiplier (default 1.0, higher = faster)
+}
+
+/** Compute animation frame index from a tick counter (~20 ticks/sec). Respects animSpeed. */
+export function getSpriteFrame(tick: number, def: SpriteDef): number {
+  const speed = def.animSpeed ?? 1.0;
+  if (speed !== 1.0) {
+    return Math.floor(tick * (def.cols * speed) / 20) % def.cols;
+  }
+  const ticksPerFrame = Math.max(1, Math.round(20 / def.cols));
+  return Math.floor(tick / ticksPerFrame) % def.cols;
 }
 
 // Tiny Swords spritesheets: divide total width by frame height to get frame count
@@ -568,9 +579,9 @@ const UPGRADE_MOVE_SPRITES: Record<string, SpriteDef> = {
   [upgradeKey(Race.Wild, 'melee', 'F')]: { ...tsSheet(snakeRun, 1536, 192, 0.64), scale: 0.4 }, // Viper Nest (3 small snakes)
   [upgradeKey(Race.Wild, 'melee', 'G')]: { ...tsSheet(wildMelee, 1536, 192, 0.71), scale: 0.3 }, // Spider Swarm (5 tiny spiders)
   // --- Deep melee: Turtle → Frog branch (C=FrogMonster, F/G=FrogBoss) ---
-  [upgradeKey(Race.Deep, 'melee', 'C')]: cmStrip(frogMonsterMove, 1056, 48, 22),
-  [upgradeKey(Race.Deep, 'melee', 'F')]: cmStrip(frogBossMove, 2552, 97, 22),
-  [upgradeKey(Race.Deep, 'melee', 'G')]: cmStrip(frogBossMove, 2552, 97, 22),
+  [upgradeKey(Race.Deep, 'melee', 'C')]: { ...cmStrip(frogMonsterMove, 1056, 48, 22), animSpeed: 1.8 },
+  [upgradeKey(Race.Deep, 'melee', 'F')]: { ...cmStrip(frogBossMove, 2552, 97, 22), animSpeed: 1.8 },
+  [upgradeKey(Race.Deep, 'melee', 'G')]: { ...cmStrip(frogBossMove, 2552, 97, 22), animSpeed: 1.8 },
   // --- Tenders caster: Panda → Mushroom branch (C/F/G) ---
   [upgradeKey(Race.Tenders, 'caster', 'C')]: cmStrip(mushroomMove, 800, 31, 20),
   [upgradeKey(Race.Tenders, 'caster', 'F')]: cmStrip(mushroomMove, 800, 31, 20),
@@ -629,9 +640,9 @@ const UPGRADE_ATK_SPRITES: Record<string, SpriteDef> = {
   [upgradeKey(Race.Wild, 'ranged', 'F')]: tsSheet(snakeAttack, 1152, 192, 0.64),
   [upgradeKey(Race.Wild, 'ranged', 'G')]: tsSheet(snakeAttack, 1152, 192, 0.64),
   // --- Deep melee: Frog jump attacks ---
-  [upgradeKey(Race.Deep, 'melee', 'C')]: cmStrip(frogMonsterAtk, 672, 48, 14),
-  [upgradeKey(Race.Deep, 'melee', 'F')]: cmStrip(frogBossAtk, 2552, 138, 22, 0.90),
-  [upgradeKey(Race.Deep, 'melee', 'G')]: cmStrip(frogBossAtk, 2552, 138, 22, 0.90),
+  [upgradeKey(Race.Deep, 'melee', 'C')]: { ...cmStrip(frogMonsterAtk, 672, 48, 14), animSpeed: 1.8 },
+  [upgradeKey(Race.Deep, 'melee', 'F')]: { ...cmStrip(frogBossAtk, 2552, 138, 22, 0.90), animSpeed: 1.8 },
+  [upgradeKey(Race.Deep, 'melee', 'G')]: { ...cmStrip(frogBossAtk, 2552, 138, 22, 0.90), animSpeed: 1.8 },
   // --- Tenders caster: Mushroom spell loop ---
   [upgradeKey(Race.Tenders, 'caster', 'C')]: cmStrip(mushroomAtk, 714, 40, 14),
   [upgradeKey(Race.Tenders, 'caster', 'F')]: cmStrip(mushroomAtk, 714, 40, 14),
@@ -872,6 +883,16 @@ export class SpriteLoader {
 
   /** Returns [image, spriteDef] or null if not loaded yet.
    *  upgradeNode: optional upgrade node key (e.g. 'C', 'F', 'G') to use upgrade-path art */
+  /** Check if a dedicated attack sprite exists for this unit config. */
+  hasAttackSprite(race: Race, category: UnitCategory, upgradeNode?: string): boolean {
+    if (upgradeNode) {
+      const key = upgradeKey(race, category, upgradeNode);
+      if (UPGRADE_ATK_SPRITES[key]) return true;
+    }
+    const atkSprites = RACE_ATK_SPRITES[race];
+    return !!(atkSprites?.[category]);
+  }
+
   getUnitSprite(race: Race, category: UnitCategory, playerId: number, attacking = false, upgradeNode?: string): [HTMLImageElement, SpriteDef] | null {
     // Check upgrade-path sprites first
     if (upgradeNode) {

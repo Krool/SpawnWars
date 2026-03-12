@@ -1,5 +1,5 @@
 import { Camera } from './Camera';
-import { SpriteLoader, drawSpriteFrame, drawGridFrame, type SpriteDef, type GridSpriteDef } from './SpriteLoader';
+import { SpriteLoader, drawSpriteFrame, drawGridFrame, getSpriteFrame, type SpriteDef, type GridSpriteDef } from './SpriteLoader';
 import { UIAssets } from './UIAssets';
 import {
   GameState, Team, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE,
@@ -12,7 +12,7 @@ import {
 } from '../simulation/types';
 import { DUEL_MAP } from '../simulation/maps';
 import { getHQPosition, getBuildGridOrigin, getHutGridOrigin, getTeamAlleyOrigin, getUnitUpgradeMultipliers } from '../simulation/GameState';
-import { RACE_COLORS, TOWER_STATS, PLAYER_COLORS } from '../simulation/data';
+import { RACE_COLORS, TOWER_STATS, PLAYER_COLORS, getRaceUsedResources } from '../simulation/data';
 import {
   getDayNight, DayNightState,
   ScreenShake, WeatherSystem, AmbientParticles,
@@ -1192,10 +1192,6 @@ export class Renderer {
     }
   }
 
-  private getUnitFrame(tick: number, cols: number): number {
-    const ticksPerFrame = Math.max(1, Math.round(20 / cols));
-    return Math.floor(tick / ticksPerFrame) % cols;
-  }
 
   private drawDeadUnit(ctx: CanvasRenderingContext2D, dead: DeadUnitSnapshot): void {
     const px = dead.x * T;
@@ -1672,9 +1668,11 @@ export class Renderer {
         const aspect = def.frameW / def.frameH;
         const drawW = baseH * aspect;
         const drawH = baseH * (def.heightScale ?? 1.0);
+        // Ranged/caster units stand still when attacking without a dedicated attack sprite
+        const idleWhileAttacking = isAttacking && (cat === 'ranged' || cat === 'caster')
+          && race != null && !this.sprites.hasAttackSprite(race, cat, u.upgradeNode);
         // Normalize animation: ~1 cycle per second (20 ticks) regardless of frame count
-        const ticksPerFrame = Math.max(1, Math.round(20 / def.cols));
-        const frame = Math.floor(state.tick / ticksPerFrame) % def.cols;
+        const frame = idleWhileAttacking ? 0 : getSpriteFrame(state.tick, def);
         // Anchor feet at consistent ground level
         const feetY = py + T * 0.70;
         const drawY = feetY - drawH * (def.groundY ?? 0.71);
@@ -2234,8 +2232,7 @@ export class Renderer {
         const drawH = T * 1.56 * hScale;
         const aspect = def.frameW / def.frameH;
         const drawW = drawH * aspect;
-        const ticksPerFrame = Math.max(1, Math.round(20 / def.cols));
-        const frame = Math.floor(state.tick / ticksPerFrame) % def.cols;
+        const frame = getSpriteFrame(state.tick, def);
 
         // Use negative id space for harvesters to avoid collision with unit ids
         const faceLeft = this.updateFacing(-h.id, h.x, h.team === Team.Top);
@@ -2553,7 +2550,7 @@ export class Renderer {
       const spriteData = race
         ? this.sprites.getUnitSprite(race, category, u.playerId, wasAttacking, u.upgradeNode)
         : null;
-      const frame = spriteData ? this.getUnitFrame(state.tick, spriteData[1].cols) : 0;
+      const frame = spriteData ? getSpriteFrame(state.tick, spriteData[1]) : 0;
       this.lastUnitPositions.set(u.id, { x: u.x, y: u.y, team: u.team, race });
       this.lastUnitRenders.set(u.id, {
         x: u.x,
@@ -2761,9 +2758,10 @@ export class Renderer {
     const woodRate = ps ? (ps.totalWoodEarned / elapsed).toFixed(1) : '?';
     const stoneRate = ps ? (ps.totalStoneEarned / elapsed).toFixed(1) : '?';
 
-    drawRes('gold', player.gold, '#ffd700', goldRate);
-    drawRes('wood', player.wood, '#4caf50', woodRate);
-    drawRes('meat', player.stone, '#e57373', stoneRate);
+    const used = getRaceUsedResources(player.race);
+    if (used.gold) drawRes('gold', player.gold, '#ffd700', goldRate);
+    if (used.wood) drawRes('wood', player.wood, '#4caf50', woodRate);
+    if (used.stone) drawRes('meat', player.stone, '#e57373', stoneRate);
 
     // Timer + ping — right-aligned, left of settings/info buttons (which are ~70px from right edge)
     const hudRightEdge = networkLatencyMs !== undefined ? W - 80 : W - pad;
