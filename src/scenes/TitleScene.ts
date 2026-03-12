@@ -40,35 +40,6 @@ function saveLocalSetup(setup: LocalSetup): void {
   try { localStorage.setItem(LOCAL_SETUP_KEY, JSON.stringify(setup)); } catch {}
 }
 
-function loadLocalSetup(): LocalSetup | null {
-  try {
-    const raw = localStorage.getItem(LOCAL_SETUP_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.mapId === 'string' && typeof parsed.maxSlots === 'number') {
-      return parsed as LocalSetup;
-    }
-  } catch {}
-  return null;
-}
-
-function createDefaultLocalSetup(race: Race): LocalSetup {
-  const mapDef = getMapById('duel');
-  const ppt = mapDef.playersPerTeam;
-  // Fill enemy team (team 2) with Medium bots
-  const bots: { [slot: string]: string } = {};
-  for (let i = ppt; i < mapDef.maxPlayers; i++) {
-    bots[String(i)] = BotDifficultyLevel.Medium;
-  }
-  return {
-    mapId: 'duel',
-    maxSlots: mapDef.maxPlayers,
-    bots,
-    playerSlot: 0,
-    playerRace: race,
-  };
-}
-
 /** Check if each team has at least 1 occupied slot (player or bot). */
 function canStartLocalSetup(setup: LocalSetup): boolean {
   const mapDef = getMapById(setup.mapId);
@@ -1360,22 +1331,6 @@ export class TitleScene implements Scene {
     } catch (e: any) {
       console.error('[Party] Create party failed:', e);
       this.showPartyError(e.message || 'Failed to create party');
-    }
-  }
-
-  private doLocalSetup(): void {
-    // Load saved setup or create default
-    const saved = loadLocalSetup();
-    if (saved) {
-      // Validate saved setup is still valid
-      const mapDef = getMapById(saved.mapId);
-      if (mapDef && saved.maxSlots === mapDef.maxPlayers) {
-        this.localSetup = saved;
-      } else {
-        this.localSetup = createDefaultLocalSetup(Race.Crown);
-      }
-    } else {
-      this.localSetup = createDefaultLocalSetup(Race.Crown);
     }
   }
 
