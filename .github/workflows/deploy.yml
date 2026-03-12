@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 20
+          fetch-depth: 50
 
       - uses: actions/setup-node@v4
         with:
@@ -49,19 +49,23 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
-          BEFORE: ${{ github.event.before }}
+          RUN_ID: ${{ github.run_id }}
           AUTHOR: ${{ github.actor }}
           DEPLOY_URL: ${{ steps.deployment.outputs.page_url }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          DESCFILE=$(mktemp)
-          echo "**Recent changes:**" > "$DESCFILE"
-          # Only show commits new in this push (between previous HEAD and current)
-          if [ -n "$BEFORE" ] && git cat-file -t "$BEFORE" >/dev/null 2>&1; then
-            RANGE="${BEFORE}..${SHA}"
+          # Find the SHA of the previous successful deploy (exclude current run)
+          LAST_GOOD_SHA=$(gh run list --workflow=deploy.yml --status=success --json databaseId,headSha \
+            --jq "[.[] | select(.databaseId != $RUN_ID)] | .[0].headSha // empty" 2>/dev/null || true)
+          # Fall back to fetch-depth range if no prior deploy found
+          if [ -n "$LAST_GOOD_SHA" ] && git cat-file -t "$LAST_GOOD_SHA" >/dev/null 2>&1; then
+            RANGE="${LAST_GOOD_SHA}..${SHA}"
           else
-            RANGE="-1"
+            RANGE="-5"
           fi
+          DESCFILE=$(mktemp)
+          echo "**Changes since last deploy:**" > "$DESCFILE"
           git log --oneline --no-decorate $RANGE | while IFS= read -r line; do
             HASH=$(echo "$line" | cut -d' ' -f1)
             MSG=$(echo "$line" | cut -d' ' -f2-)
