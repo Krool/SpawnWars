@@ -52,7 +52,12 @@ uiReady.then(() => {
       const def = ACHIEVEMENTS.find(a => a.id === achId);
       if (def) manager.showToast(`Achievement: ${def.name}`, def.desc);
     }
-    postMatchScene.setStats({ state: game.state, localPlayerId: game.playerSlot });
+    postMatchScene.setStats({
+      state: game.state,
+      localPlayerId: game.playerSlot,
+      slotNames: game.slotNames,
+      slotBotDifficulties: game.slotBotDifficulties,
+    });
     // Clean up party data from Firebase when match ends
     if (titleScene.party) {
       titleScene.party.leaveParty();
@@ -94,6 +99,12 @@ uiReady.then(() => {
         humanPlayers.push({ slot: i, race });
       }
     }
+    // Build slot names from party players
+    const slotNames: { [slot: string]: string } = {};
+    for (let i = 0; i < party.maxSlots; i++) {
+      const p = party.players[String(i)];
+      if (p) slotNames[String(i)] = p.name;
+    }
     matchScene.setPartyConfig({
       humanPlayers,
       slotBots: party.bots,
@@ -103,6 +114,7 @@ uiReady.then(() => {
       partyCode: party.code,
       botDifficulty: difficulty,
       mapDef,
+      slotNames,
     });
     manager.switchTo('match');
   };
@@ -124,6 +136,7 @@ uiReady.then(() => {
       partyCode: '',  // empty = local game, no CommandSync
       botDifficulty: BotDifficultyLevel.Medium,
       mapDef,
+      slotNames: { [String(setup.playerSlot)]: titleScene.name },
     });
     manager.switchTo('match');
   };

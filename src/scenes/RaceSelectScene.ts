@@ -288,14 +288,17 @@ export class RaceSelectScene implements Scene {
   }
 
   private getRandomButtonRect(): { x: number; y: number; w: number; h: number } {
+    const h = this.canvas.clientHeight;
     const boxes = this.getBoxLayout();
     const lastRow = boxes[RACES.length - 1]; // Tenders (bottom-right)
     const btnW = lastRow.w * 0.8;
     const btnH = Math.max(22, lastRow.h * 0.22);
     const gridBottom = lastRow.y + lastRow.h;
+    // Cap so it doesn't overlap the bottom BACK/NEXT buttons (pinned at h - 72, 56px tall)
+    const maxY = h - 72 - btnH - 8;
     return {
       x: (this.canvas.clientWidth - btnW) / 2,
-      y: gridBottom + 6,
+      y: Math.min(gridBottom + 6, maxY),
       w: btnW,
       h: btnH,
     };

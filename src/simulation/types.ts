@@ -416,6 +416,7 @@ export interface FloatingText {
   y: number;
   text: string;
   color: string;
+  icon?: string;   // optional resource icon name ('gold', 'wood', 'meat')
   age: number;     // ticks alive
   maxAge: number;  // ticks until removed
 }

@@ -22,7 +22,7 @@ import {
 const T = TILE_SIZE;
 const LANE_LEFT_COLOR = '#4fc3f7';
 const LANE_RIGHT_COLOR = '#ff8a65';
-const DEAD_UNIT_LIFETIME_SEC = 0.45;
+const DEAD_UNIT_LIFETIME_SEC = 0.9;
 
 type UnitCategory = 'melee' | 'ranged' | 'caster';
 
@@ -1178,7 +1178,16 @@ export class Renderer {
   private updateDeadUnits(dt: number): void {
     for (let i = this.deadUnits.length - 1; i >= 0; i--) {
       const dead = this.deadUnits[i];
+      const prevProgress = dead.ageSec / DEAD_UNIT_LIFETIME_SEC;
       dead.ageSec += dt;
+      const newProgress = dead.ageSec / DEAD_UNIT_LIFETIME_SEC;
+      // Spawn small dust puff when corpse hits the ground (at ~60% progress)
+      if (prevProgress < 0.6 && newProgress >= 0.6) {
+        this.deathEffects.push({
+          x: dead.x, y: dead.y + 0.3, frame: 0, maxFrames: 10,
+          size: T * 0.9, type: 'dust',
+        });
+      }
       if (dead.ageSec >= DEAD_UNIT_LIFETIME_SEC) this.deadUnits.splice(i, 1);
     }
   }
@@ -1194,15 +1203,32 @@ export class Renderer {
     const cx = px + T / 2;
     const feetY = py + T * 0.70;
     const progress = Math.min(1, dead.ageSec / DEAD_UNIT_LIFETIME_SEC);
-    const alpha = 1 - progress * 0.75;
-    const flatten = 1 - progress * 0.72;
-    const rotation = (dead.faceLeft ? -1 : 1) * progress * 1.15;
+
+    // Phase 1: red flash + upward pop (first 15% of animation)
+    // Phase 2: tip-over fall (15%-60%)
+    // Phase 3: hold corpse + fade (60%-100%)
+    const flashPhase = Math.min(1, progress / 0.15);
+    const fallPhase = progress < 0.15 ? 0 : Math.min(1, (progress - 0.15) / 0.45);
+    const fadePhase = progress < 0.6 ? 0 : (progress - 0.6) / 0.4;
+
+    // Upward pop: small bounce on death then settle
+    const popY = flashPhase < 1 ? -Math.sin(flashPhase * Math.PI) * 4 : 0;
+
+    // Opacity: full during flash+fall, then fade out
+    const alpha = fadePhase > 0 ? 1 - fadePhase * 0.85 : 1;
+
+    // Tip-over with ease-out
+    const fallEased = 1 - (1 - fallPhase) * (1 - fallPhase);
+    const rotation = (dead.faceLeft ? -1 : 1) * fallEased * 1.4;
+    const flatten = 1 - fallEased * 0.72;
 
     ctx.save();
     ctx.globalAlpha = alpha;
+
+    // Shadow: grows as unit falls
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.beginPath();
-    ctx.ellipse(cx, py + T - 1, 7 + progress * 3, 2.5 + progress, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, py + T - 1, 7 + fallEased * 4, 2.5 + fallEased * 1.5, 0, 0, Math.PI * 2);
     ctx.fill();
 
     const spriteData = dead.race
@@ -1219,13 +1245,21 @@ export class Renderer {
       const drawH = baseH * (def.heightScale ?? 1.0);
       const groundY = def.groundY ?? 0.71;
 
-      ctx.translate(cx, feetY);
+      ctx.translate(cx, feetY + popY);
       ctx.rotate(rotation);
       ctx.scale(dead.faceLeft ? -1 : 1, flatten);
+
       drawSpriteFrame(ctx, img, def, dead.frame, -drawW / 2, -drawH * groundY, drawW, drawH);
+      // Bright flash overlay during initial hit reaction (same as hit flash style)
+      if (flashPhase < 1) {
+        ctx.globalAlpha = (1 - flashPhase) * 0.55;
+        ctx.globalCompositeOperation = 'lighter';
+        drawSpriteFrame(ctx, img, def, dead.frame, -drawW / 2, -drawH * groundY, drawW, drawH);
+        ctx.globalCompositeOperation = 'source-over';
+      }
     } else {
       const radius = (dead.category === 'ranged' ? 3 : 4) * tierScale;
-      ctx.translate(cx, py + T / 2);
+      ctx.translate(cx, py + T / 2 + popY);
       ctx.rotate(rotation);
       ctx.scale(1, flatten);
       this.drawUnitShape(ctx, 0, 0, radius, dead.race, dead.category, dead.team, PLAYER_COLORS[dead.playerId] || '#888');
@@ -2230,23 +2264,41 @@ export class Renderer {
 
       if (h.carryingResource === ResourceType.Wood && h.carryAmount > 0 && h.state === 'walking_home') {
         const faceLeft = this.updateFacing(-h.id, h.x, h.team === Team.Top);
-        const bundleX = px + (faceLeft ? -6 : 6);
-        const bundleY = py - 4;
-        for (let i = 0; i < 3; i++) {
-          const offsetY = i * 2 - 2;
-          ctx.fillStyle = i === 1 ? '#a56a3f' : '#8d5a35';
-          ctx.fillRect(bundleX - 4, bundleY + offsetY - 1, 8, 2);
-          ctx.fillStyle = '#d7b083';
-          ctx.beginPath();
-          ctx.arc(bundleX - 4, bundleY + offsetY, 1, 0, Math.PI * 2);
-          ctx.arc(bundleX + 4, bundleY + offsetY, 1, 0, Math.PI * 2);
-          ctx.fill();
+        const bundleX = px + (faceLeft ? -7 : 7);
+        const bundleY = py - 5;
+        const logData = this.sprites.getResourceSprite('woodResource');
+        if (logData) {
+          const [img, def] = logData;
+          const sz = 10;
+          drawSpriteFrame(ctx, img, def, 0, bundleX - sz / 2, bundleY - sz / 2, sz, sz);
+        } else {
+          ctx.fillStyle = '#8d5a35';
+          ctx.fillRect(bundleX - 4, bundleY - 2, 8, 4);
         }
       }
 
       if (h.carryingDiamond) {
         ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2);
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      }
+
+      // Frightened indicator: slow VFX when enemies nearby
+      let frightened = false;
+      for (const u of state.units) {
+        if (u.team === h.team || u.hp <= 0) continue;
+        const edx = u.x - h.x, edy = u.y - h.y;
+        if (edx * edx + edy * edy <= 25) { frightened = true; break; }
+      }
+      if (frightened) {
+        const fxData = this.sprites.getFxSprite('slow');
+        if (fxData) {
+          const [fxImg, fxDef] = fxData;
+          const fxSize = T * 0.7;
+          const fxTick = Math.floor(state.tick / 4) % fxDef.cols;
+          ctx.globalAlpha = 0.55;
+          drawSpriteFrame(ctx, fxImg, fxDef as SpriteDef, fxTick + h.id * 3, px - fxSize / 2, py - fxSize * 0.6, fxSize, fxSize);
+          ctx.globalAlpha = 1;
+        }
       }
 
       // HP bar
@@ -2523,9 +2575,12 @@ export class Renderer {
         const pos = this.lastUnitPositions.get(id);
         const render = this.lastUnitRenders.get(id);
         if (pos) {
+          // Scale burst by unit tier — bigger units get bigger death effects
+          const tier = render?.upgradeTier ?? 0;
+          const burstScale = 1.0 + tier * 0.15;
           this.deathEffects.push({
-            x: pos.x, y: pos.y, frame: 0, maxFrames: 14,
-            size: T * 1.8, type: 'race_burst', race: pos.race
+            x: pos.x, y: pos.y, frame: 0, maxFrames: 16,
+            size: T * 1.8 * burstScale, type: 'race_burst', race: pos.race
           });
         }
         if (render) {
@@ -2590,12 +2645,26 @@ export class Renderer {
       ctx.globalAlpha = alpha;
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
+      const px = ft.x * T;
+      const py = ft.y * T + yOff;
       // Dark outline for readability
       ctx.strokeStyle = 'rgba(0,0,0,0.7)';
       ctx.lineWidth = 2.5;
-      ctx.strokeText(ft.text, ft.x * T, ft.y * T + yOff);
-      ctx.fillStyle = ft.color;
-      ctx.fillText(ft.text, ft.x * T, ft.y * T + yOff);
+      if (ft.icon) {
+        // Draw text shifted left to make room for icon
+        const textW = ctx.measureText(ft.text).width;
+        const iconSz = 10;
+        const totalW = textW + iconSz + 1;
+        const textX = px - totalW / 2 + textW / 2;
+        ctx.strokeText(ft.text, textX, py);
+        ctx.fillStyle = ft.color;
+        ctx.fillText(ft.text, textX, py);
+        this.ui.drawIcon(ctx, ft.icon as any, textX + textW / 2 + 1, py - iconSz / 2 - 1, iconSz);
+      } else {
+        ctx.strokeText(ft.text, px, py);
+        ctx.fillStyle = ft.color;
+        ctx.fillText(ft.text, px, py);
+      }
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = 'start';

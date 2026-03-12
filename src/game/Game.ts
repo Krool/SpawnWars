@@ -35,6 +35,11 @@ export class Game {
   onQuitGame: (() => void) | null = null;
   private matchEndTick = 0;
 
+  /** Per-slot display names for the results screen. */
+  slotNames: { [slot: string]: string } = {};
+  /** Per-slot bot difficulty labels (absent = human). */
+  slotBotDifficulties: { [slot: string]: string } = {};
+
   private botCtx!: BotContext;
 
   // Multiplayer state

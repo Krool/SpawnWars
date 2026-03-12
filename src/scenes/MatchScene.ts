@@ -17,6 +17,8 @@ export interface PartyConfig {
   partyCode: string;
   botDifficulty: BotDifficultyLevel;
   mapDef: MapDef;
+  /** Per-slot display names (for results screen). */
+  slotNames?: { [slot: string]: string };
 }
 
 export class MatchScene implements Scene {
@@ -65,9 +67,21 @@ export class MatchScene implements Scene {
         botDifficulty: pc.botDifficulty,
         mapDef: pc.mapDef,
       });
+      // Pass display info for results screen
+      if (pc.slotNames) this.game.slotNames = pc.slotNames;
+      if (pc.slotBots) {
+        for (const [slot, diff] of Object.entries(pc.slotBots)) {
+          this.game.slotBotDifficulties[slot] = diff;
+        }
+      }
     } else {
       // Solo mode (existing behavior)
       this.game = new Game(this.canvas, this.playerRace, this.ui, undefined, this.botDifficulty, this.selectedMap);
+      // Solo: all non-player slots are medium bots
+      const mapDef = this.selectedMap;
+      for (let i = 0; i < mapDef.maxPlayers; i++) {
+        if (i !== 0) this.game.slotBotDifficulties[String(i)] = this.botDifficulty;
+      }
     }
     this.game.onMatchEnd = () => {
       if (this.game) this.onMatchEnd(this.game);

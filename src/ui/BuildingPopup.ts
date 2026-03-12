@@ -283,12 +283,16 @@ export class BuildingPopup {
     if (isSpawner) {
       this.laneBtnRect = { x: footerX, y: footerY, w: footerBtnW, h: FOOTER_BTN_H };
       ui.drawBigBlueButton(ctx, footerX, footerY, footerBtnW, FOOTER_BTN_H);
-      const laneArrow = building.lane === 'left' ? '<' : '>';
+      const isHorizontal = state.mapDef.shapeAxis === 'x';
+      const laneLabel = building.lane === 'left'
+        ? (isHorizontal ? 'TOP' : 'LEFT')
+        : (isHorizontal ? 'BOT' : 'RIGHT');
       const laneColor = building.lane === 'left' ? '#4fc3f7' : '#ff8a65';
       ctx.textAlign = 'center';
-      ctx.font = 'bold 24px monospace';
+      ctx.font = 'bold 11px monospace';
       ctx.fillStyle = laneColor;
-      ctx.fillText(laneArrow, footerX + footerBtnW / 2, footerY + FOOTER_BTN_H / 2 + 8);
+      ctx.fillText(laneLabel, footerX + footerBtnW / 2, footerY + FOOTER_BTN_H / 2 - 5);
+      ctx.fillText('LANE', footerX + footerBtnW / 2, footerY + FOOTER_BTN_H / 2 + 9);
       footerX += footerBtnW + GAP;
     }
 

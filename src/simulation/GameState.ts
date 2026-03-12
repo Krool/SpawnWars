@@ -226,8 +226,8 @@ function isAccessible(cellMap: Map<string, GoldCell>, tx: number, ty: number): b
 
 // === Visual effect helpers ===
 
-function addFloatingText(state: GameState, x: number, y: number, text: string, color: string): void {
-  state.floatingTexts.push({ x, y, text, color, age: 0, maxAge: TICK_RATE * 1.5 });
+function addFloatingText(state: GameState, x: number, y: number, text: string, color: string, icon?: string): void {
+  state.floatingTexts.push({ x, y, text, color, icon, age: 0, maxAge: TICK_RATE * 1.5 });
 }
 
 function addDeathParticles(state: GameState, x: number, y: number, color: string, count: number): void {
@@ -739,7 +739,7 @@ function sellBuilding(state: GameState, cmd: Extract<GameCommand, { type: 'sell_
     if (hIdx !== -1) state.harvesters.splice(hIdx, 1);
   }
 
-  addFloatingText(state, building.worldX, building.worldY, `+${Math.floor(cost.gold * 0.5)}g`, '#ffd700');
+  addFloatingText(state, building.worldX, building.worldY, `+${Math.floor(cost.gold * 0.5)}`, '#ffd700', 'gold');
   addSound(state, 'building_destroyed', building.worldX, building.worldY);
   state.buildings.splice(idx, 1);
 }
@@ -2708,34 +2708,14 @@ function tickHarvesters(state: GameState, cellMap: Map<string, GoldCell>): void 
       continue;
     }
 
-    const movePerTick = HARVESTER_MOVE_SPEED / TICK_RATE;
-
-    // Flee behavior: if enemies within 5 tiles, run toward base
-    let shouldFlee = false;
+    // Frightened: 50% slower when enemies within 5 tiles
+    let frightened = false;
     for (const u of state.units) {
       if (u.team === h.team || u.hp <= 0) continue;
       const dx = u.x - h.x, dy = u.y - h.y;
-      if (dx * dx + dy * dy <= 25) { shouldFlee = true; break; }
+      if (dx * dx + dy * dy <= 25) { frightened = true; break; }
     }
-    if (shouldFlee) {
-      const hq = getHQPosition(h.team, state.mapDef);
-      const tx = hq.x + HQ_WIDTH / 2, ty = hq.y + HQ_HEIGHT / 2;
-      const dx = tx - h.x, dy = ty - h.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 1) {
-        // Flee at 1.5x speed
-        const fleeSpeed = movePerTick * 1.5;
-        moveWithSlide(h, tx, ty, fleeSpeed, state.diamondCells, state.mapDef);
-      }
-      // Interrupt mining
-      if (h.state === 'mining') {
-        if (h.assignment === HarvesterAssignment.Wood) spillCarriedWood(state, h);
-        h.state = 'walking_to_node';
-        h.targetCellIdx = -1;
-      }
-      clampToArenaBounds(h, 0.3, state.mapDef);
-      continue;
-    }
+    const movePerTick = (HARVESTER_MOVE_SPEED / TICK_RATE) * (frightened ? 0.5 : 1.0);
 
     if (h.assignment === HarvesterAssignment.Center) {
       tickCenterHarvester(state, h, movePerTick, cellMap);
@@ -2937,15 +2917,15 @@ function walkHome(state: GameState, h: HarvesterState, movePerTick: number): voi
     if (h.carryingResource === ResourceType.Gold) {
       player.gold += h.carryAmount;
       if (ps) ps.totalGoldEarned += h.carryAmount;
-      if (state.tick % 2 === 0) addFloatingText(state, h.x, h.y, `+${h.carryAmount}g`, '#ffd700');
+      if (state.tick % 2 === 0) addFloatingText(state, h.x, h.y, `+${h.carryAmount}`, '#ffd700', 'gold');
     } else if (h.carryingResource === ResourceType.Wood) {
       player.wood += h.carryAmount;
       if (ps) ps.totalWoodEarned += h.carryAmount;
-      if (state.tick % 2 === 0) addFloatingText(state, h.x, h.y, `+${h.carryAmount}w`, '#8d6e63');
+      if (state.tick % 2 === 0) addFloatingText(state, h.x, h.y, `+${h.carryAmount}`, '#8d6e63', 'wood');
     } else if (h.carryingResource === ResourceType.Stone) {
       player.stone += h.carryAmount;
       if (ps) ps.totalStoneEarned += h.carryAmount;
-      if (state.tick % 2 === 0) addFloatingText(state, h.x, h.y, `+${h.carryAmount}s`, '#90a4ae');
+      if (state.tick % 2 === 0) addFloatingText(state, h.x, h.y, `+${h.carryAmount}`, '#ff5252', 'meat');
     }
     h.carryingResource = null;
     h.carryAmount = 0;

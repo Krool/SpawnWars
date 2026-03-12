@@ -6,7 +6,7 @@ import {
 } from '../simulation/BotAI';
 
 const MATCHES_PER_PAIR = 20;
-const MAX_MATCH_TICKS = 8 * 60 * TICK_RATE; // 8 minutes — HP differential breaks ties
+const MAX_MATCH_TICKS = 10 * 60 * TICK_RATE; // 10 minutes — enough time for advantages to compound
 // Test across multiple races to ensure results aren't race-specific
 const TEST_RACES = [Race.Crown, Race.Horde, Race.Demon, Race.Deep, Race.Oozlings];
 

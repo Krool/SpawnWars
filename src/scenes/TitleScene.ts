@@ -647,6 +647,7 @@ export class TitleScene implements Scene {
 
   // Player name & profile
   private playerName = loadPlayerName();
+  get name(): string { return this.playerName; }
   private diceBtnRect = { x: 0, y: 0, w: 0, h: 0 };
   private profileBtnRect = { x: 0, y: 0, w: 0, h: 0 };
   private resetEloBtnRect = { x: 0, y: 0, w: 0, h: 0 };

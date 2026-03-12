@@ -6,6 +6,10 @@ import { UIAssets } from '../rendering/UIAssets';
 export interface MatchStats {
   state: GameState;
   localPlayerId: number;
+  /** Per-slot display names (human players). */
+  slotNames?: { [slot: string]: string };
+  /** Per-slot bot difficulty (absent = human). */
+  slotBotDifficulties?: { [slot: string]: string };
 }
 
 export class PostMatchScene implements Scene {
@@ -138,7 +142,9 @@ export class PostMatchScene implements Scene {
     const panelH = h * 0.82;
     const panelX = (w - panelW) / 2;
     const panelY = headerBannerY + headerBannerH + 38;
-    this.ui.drawBanner(ctx, panelX, panelY, panelW, panelH);
+    const bgPadX = Math.round(panelW * 0.05);
+    const bgPadY = Math.round(panelH * 0.05);
+    this.ui.drawBanner(ctx, panelX - bgPadX, panelY - bgPadY, panelW + bgPadX * 2, panelH + bgPadY * 2);
 
     // Inner content area (inset from Banner 9-slice borders)
     const pad = panelW * 0.06;
@@ -201,13 +207,13 @@ export class PostMatchScene implements Scene {
         ctx.fillRect(innerL, rowTop, innerW, rowH);
       }
 
-      const teamStr = p.team === Team.Bottom ? 'BTM' : 'TOP';
       const raceStr = p.race.charAt(0).toUpperCase() + p.race.slice(1);
+      const label = this.slotLabel(i);
       ctx.font = `bold ${fontSize * 0.8}px monospace`;
       ctx.textAlign = 'left';
       const pc = PLAYER_COLORS[i];
       ctx.fillStyle = this.darkenColor(pc, 0.6);
-      ctx.fillText(`P${i + 1} ${teamStr} ${raceStr}`, colX[0], y);
+      ctx.fillText(`${label} ${raceStr}`, colX[0], y);
 
       ctx.font = `${fontSize * 0.8}px monospace`;
       ctx.fillStyle = '#2a1e10';
@@ -255,7 +261,7 @@ export class PostMatchScene implements Scene {
     for (let i = 0; i < awards.length; i++) {
       const a = awards[i];
       ctx.fillStyle = this.darkenColor(PLAYER_COLORS[a.playerId], 0.6);
-      ctx.fillText(`${a.label}: P${a.playerId + 1} (${a.value})`, w / 2, awardY + (i + 1) * rowH * 0.8);
+      ctx.fillText(`${a.label}: ${this.slotLabel(a.playerId)} (${a.value})`, w / 2, awardY + (i + 1) * rowH * 0.8);
     }
 
     // War Hero
@@ -301,7 +307,7 @@ export class PostMatchScene implements Scene {
     ctx.font = `bold ${fontSize * 0.8}px monospace`;
     ctx.fillStyle = this.darkenColor(playerColor, 0.6);
     const categoryIcon = hero.category === 'melee' ? 'Melee' : hero.category === 'ranged' ? 'Ranged' : 'Caster';
-    ctx.fillText(`P${hero.playerId + 1}'s ${categoryIcon}  -  ${hero.kills} kills`, w / 2, y + fontSize * 2.8);
+    ctx.fillText(`${this.slotLabel(hero.playerId)}'s ${categoryIcon}  -  ${hero.kills} kills`, w / 2, y + fontSize * 2.8);
 
     ctx.font = `bold ${fontSize * 0.75}px monospace`;
     if (hero.survived) {
@@ -311,6 +317,15 @@ export class PostMatchScene implements Scene {
       ctx.fillStyle = '#9a1a1a';
       ctx.fillText(`Slain by ${hero.killedByName}`, w / 2, y + fontSize * 3.8);
     }
+  }
+
+  /** Get display name for a slot: player name, bot difficulty, or fallback P{n}. */
+  private slotLabel(slotId: number): string {
+    const name = this.stats?.slotNames?.[String(slotId)];
+    if (name) return name;
+    const diff = this.stats?.slotBotDifficulties?.[String(slotId)];
+    if (diff) return `Bot ${diff.charAt(0).toUpperCase() + diff.slice(1)}`;
+    return `P${slotId + 1}`;
   }
 
   /** Darken a hex color by multiplying RGB channels by factor (0–1). */
