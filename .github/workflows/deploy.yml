@@ -49,14 +49,20 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
           AUTHOR: ${{ github.actor }}
           DEPLOY_URL: ${{ steps.deployment.outputs.page_url }}
         shell: bash
         run: |
-          SHORT_SHA="${SHA:0:7}"
           DESCFILE=$(mktemp)
           echo "**Recent changes:**" > "$DESCFILE"
-          git log --oneline -10 --no-decorate | while IFS= read -r line; do
+          # Only show commits new in this push (between previous HEAD and current)
+          if [ -n "$BEFORE" ] && git cat-file -t "$BEFORE" >/dev/null 2>&1; then
+            RANGE="${BEFORE}..${SHA}"
+          else
+            RANGE="-1"
+          fi
+          git log --oneline --no-decorate $RANGE | while IFS= read -r line; do
             HASH=$(echo "$line" | cut -d' ' -f1)
             MSG=$(echo "$line" | cut -d' ' -f2-)
             echo "- [$HASH](https://github.com/$REPO/commit/$HASH) $MSG" >> "$DESCFILE"
