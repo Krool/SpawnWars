@@ -144,7 +144,7 @@ export const UNIT_STATS: Record<Race, RaceUnits> = {
   // === CROWN (Humans) — Balanced Allrounders ===
   [Race.Crown]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Swordsman', hp: 70, damage: 9, attackSpeed: 1.0, moveSpeed: 3.5, range: 1, ascii: '[+]',
+      name: 'Swordsman', hp: 80, damage: 10, attackSpeed: 1.0, moveSpeed: 3.5, range: 1, ascii: '[+]',
     },
     [BuildingType.RangedSpawner]: {
       name: 'Bowman', hp: 45, damage: 9, attackSpeed: 1.2, moveSpeed: 3.5, range: 7, ascii: '>>',
@@ -168,10 +168,10 @@ export const UNIT_STATS: Record<Race, RaceUnits> = {
   // === GOBLINS — Speed & Trickery ===
   [Race.Goblins]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Sticker', hp: 50, damage: 8, attackSpeed: 0.8, moveSpeed: 5.0, range: 1, ascii: '/>',
+      name: 'Sticker', hp: 55, damage: 9, attackSpeed: 0.8, moveSpeed: 5.0, range: 1, ascii: '/>',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Knifer', hp: 35, damage: 7, attackSpeed: 0.9, moveSpeed: 4.5, range: 6, ascii: '~>',
+      name: 'Knifer', hp: 35, damage: 8, attackSpeed: 0.9, moveSpeed: 4.5, range: 6, ascii: '~>',
     },
     [BuildingType.CasterSpawner]: {
       name: 'Hexer', hp: 28, damage: 10, attackSpeed: 2.0, moveSpeed: 3.5, range: 7, ascii: '{G}',
@@ -180,10 +180,10 @@ export const UNIT_STATS: Record<Race, RaceUnits> = {
   // === OOZLINGS (Slimes) — Adaptive Swarm ===
   [Race.Oozlings]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Globule', hp: 45, damage: 7, attackSpeed: 0.7, moveSpeed: 4.2, range: 1, ascii: 'o', spawnCount: 2,
+      name: 'Globule', hp: 42, damage: 7, attackSpeed: 0.7, moveSpeed: 4.2, range: 1, ascii: 'o', spawnCount: 2,
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Spitter', hp: 29, damage: 6, attackSpeed: 1.0, moveSpeed: 3.8, range: 6, ascii: 'O~', spawnCount: 2,
+      name: 'Spitter', hp: 29, damage: 5, attackSpeed: 1.0, moveSpeed: 3.8, range: 6, ascii: 'O~', spawnCount: 2,
     },
     [BuildingType.CasterSpawner]: {
       name: 'Bloater', hp: 35, damage: 12, attackSpeed: 2.2, moveSpeed: 2.8, range: 6, ascii: '{O}',
@@ -192,22 +192,22 @@ export const UNIT_STATS: Record<Race, RaceUnits> = {
   // === DEMON — Glass Cannon Chaos ===
   [Race.Demon]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Smasher', hp: 68, damage: 13, attackSpeed: 0.9, moveSpeed: 4.2, range: 1, ascii: '/X\\',
+      name: 'Smasher', hp: 68, damage: 12, attackSpeed: 0.9, moveSpeed: 4.2, range: 1, ascii: '/X\\',
     },
     [BuildingType.RangedSpawner]: {
       name: 'Eye Sniper', hp: 45, damage: 11, attackSpeed: 1.3, moveSpeed: 3.5, range: 8, ascii: '@>',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Overlord', hp: 36, damage: 22, attackSpeed: 2.0, moveSpeed: 2.5, range: 7, ascii: '{D}',
+      name: 'Overlord', hp: 36, damage: 20, attackSpeed: 2.0, moveSpeed: 2.5, range: 7, ascii: '{D}',
     },
   },
   // === DEEP (Aquatic) — Control & Attrition ===
   [Race.Deep]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Shell Guard', hp: 226, damage: 9, attackSpeed: 1.1, moveSpeed: 2.5, range: 1, ascii: '|W|',
+      name: 'Shell Guard', hp: 210, damage: 9, attackSpeed: 1.1, moveSpeed: 2.5, range: 1, ascii: '|W|',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Harpooner', hp: 66, damage: 12, attackSpeed: 1.2, moveSpeed: 3.2, range: 7, ascii: '->',
+      name: 'Harpooner', hp: 66, damage: 11, attackSpeed: 1.2, moveSpeed: 3.2, range: 7, ascii: '->',
     },
     [BuildingType.CasterSpawner]: {
       name: 'Tidecaller', hp: 54, damage: 15, attackSpeed: 2.2, moveSpeed: 3.0, range: 7, ascii: '{~}',
@@ -216,7 +216,7 @@ export const UNIT_STATS: Record<Race, RaceUnits> = {
   // === WILD (Beasts) — Aggression & Poison ===
   [Race.Wild]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Lurker', hp: 45, damage: 5, attackSpeed: 0.9, moveSpeed: 3.0, range: 1, ascii: '%#',
+      name: 'Lurker', hp: 55, damage: 7, attackSpeed: 0.9, moveSpeed: 3.0, range: 1, ascii: '%#',
     },
     [BuildingType.RangedSpawner]: {
       name: 'Bonechucker', hp: 45, damage: 7, attackSpeed: 1.0, moveSpeed: 3.6, range: 6, ascii: '.@',
@@ -228,13 +228,13 @@ export const UNIT_STATS: Record<Race, RaceUnits> = {
   // === GEISTS (Undead) — Undying Attrition ===
   [Race.Geists]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Bone Knight', hp: 125, damage: 8, attackSpeed: 1.0, moveSpeed: 3.5, range: 1, ascii: '~^',
+      name: 'Bone Knight', hp: 115, damage: 8, attackSpeed: 1.0, moveSpeed: 3.5, range: 1, ascii: '~^',
     },
     [BuildingType.RangedSpawner]: {
       name: 'Wraith Bow', hp: 42, damage: 10, attackSpeed: 1.1, moveSpeed: 3.8, range: 7, ascii: '~>',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Necromancer', hp: 35, damage: 14, attackSpeed: 2.2, moveSpeed: 3.0, range: 7, ascii: '{V}',
+      name: 'Necromancer', hp: 35, damage: 13, attackSpeed: 2.2, moveSpeed: 3.0, range: 7, ascii: '{V}',
     },
   },
   // === TENDERS (Nature/Fey) — Sustain & Healing ===

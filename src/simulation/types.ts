@@ -257,6 +257,7 @@ export enum StatusType {
   Burn = 'burn',       // 2 dmg/sec per stack for 3s, max 5
   Haste = 'haste',     // 1.3x speed, 3s, no stack, refreshes
   Shield = 'shield',   // absorbs 12 damage, 4s, 1 instance
+  Frenzy = 'frenzy',   // Wild kill bonus: +30% damage, 3s, refreshes on kills
 }
 
 export interface StatusEffect {
@@ -333,6 +334,7 @@ export interface UnitState {
   upgradeSpecial: Record<string, any>; // upgrade-granted special effects
   kills: number;          // individual kill count for war hero tracking
   lastDamagedByName: string; // name of last unit/source that dealt damage
+  spawnTick: number;      // tick when unit was created
 }
 
 // Snapshot of a notable unit for post-match display
@@ -343,6 +345,8 @@ export interface WarHero {
   kills: number;
   survived: boolean;
   killedByName: string | null; // name of the unit/source that killed it, null if survived
+  spawnTick: number;    // tick when unit was spawned
+  deathTick: number | null; // tick when unit died, null if survived
 }
 
 // A single gold cell in the diamond obstacle
@@ -552,6 +556,7 @@ export interface GameState {
   particles: Particle[];
   nukeEffects: NukeEffect[];
   nukeTelegraphs: NukeTelegraph[];
+  nukeTeamCooldown: number[];   // per-team cooldown ticks remaining (0 = ready)
   pings: PingState[];
   quickChats: QuickChatState[];
   soundEvents: SoundEvent[];

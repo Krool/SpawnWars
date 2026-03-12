@@ -348,10 +348,11 @@ export class CommandSync {
     this.unsubs = [];
     this.subscribedTurns.clear();
 
-    // Clean up game data from Firebase
+    // Clean up only our own ready signal — don't delete the whole game node
+    // because the other player may still be writing turns
     try {
       const db = getDb();
-      remove(ref(db, `games/${this.partyCode}`)).catch(() => {});
+      remove(ref(db, `games/${this.partyCode}/ready/${this.localSlotId}`)).catch(() => {});
     } catch {
       // DB may not be available
     }
@@ -359,5 +360,15 @@ export class CommandSync {
     this.connected = false;
     this.turnBuffer.clear();
     this.resolvers.clear();
+  }
+
+  /** Delete the entire game node from Firebase. Call only when the match is truly over. */
+  cleanup(): void {
+    try {
+      const db = getDb();
+      remove(ref(db, `games/${this.partyCode}`)).catch(() => {});
+    } catch {
+      // DB may not be available
+    }
   }
 }

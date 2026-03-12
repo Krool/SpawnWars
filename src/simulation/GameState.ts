@@ -196,7 +196,7 @@ function hasPathToEdge(cellMap: Map<string, GoldCell>, sx: number, sy: number, s
   return false;
 }
 
-function findBestCellToMine(cells: GoldCell[], cellMap: Map<string, GoldCell>, fromX: number, fromY: number): number {
+function findBestCellToMine(cells: GoldCell[], cellMap: Map<string, GoldCell>, fromX: number, fromY: number, claimedIndices?: Set<number>): number {
   let bestIdx = -1;
   let bestDist = Infinity;
 
@@ -206,7 +206,9 @@ function findBestCellToMine(cells: GoldCell[], cellMap: Map<string, GoldCell>, f
     if (!isAccessible(cellMap, c.tileX, c.tileY)) continue;
     const dx = c.tileX - fromX;
     const dy = c.tileY - fromY;
-    const dist = dx * dx + dy * dy;
+    let dist = dx * dx + dy * dy;
+    // Penalize cells already claimed by a teammate so harvesters spread out
+    if (claimedIndices && claimedIndices.has(i)) dist += 25;
     if (dist < bestDist) {
       bestDist = dist;
       bestIdx = i;
@@ -306,6 +308,7 @@ export function createInitialState(
     particles: [],
     nukeEffects: [],
     nukeTelegraphs: [],
+    nukeTeamCooldown: map.teams.map(() => 0),
     pings: [],
     quickChats: [],
     soundEvents: [],
@@ -642,7 +645,7 @@ function purchaseUpgrade(state: GameState, cmd: Extract<GameCommand, { type: 'pu
   player.stone -= cost.stone;
   building.upgradePath.push(cmd.choice);
 
-  // Apply HP upgrade to tower (scales maxHp and heals proportionally)
+  // Apply HP upgrade to tower (scales maxHp, preserves ratio, then heals 30%)
   if (building.type === BuildingType.Tower) {
     const upgrade = getUnitUpgradeMultipliers(building.upgradePath, player.race, BuildingType.Tower);
     const baseCost = getBuildingCost(player.race, BuildingType.Tower);
@@ -650,7 +653,7 @@ function purchaseUpgrade(state: GameState, cmd: Extract<GameCommand, { type: 'pu
       const newMax = Math.max(1, Math.round(baseCost.hp * upgrade.hp));
       const hpRatio = building.hp / building.maxHp;
       building.maxHp = newMax;
-      building.hp = Math.round(newMax * hpRatio);
+      building.hp = Math.min(newMax, Math.round(newMax * hpRatio) + Math.round(newMax * 0.3));
     }
   }
 
@@ -822,17 +825,23 @@ function setHutAssignment(state: GameState, cmd: Extract<GameCommand, { type: 's
   }
 }
 
+const NUKE_TEAM_COOLDOWN_TICKS = 10 * TICK_RATE; // 10s team-wide cooldown between nukes
+
 function fireNuke(state: GameState, cmd: Extract<GameCommand, { type: 'fire_nuke' }>): void {
   const player = state.players[cmd.playerId];
   if (!player.nukeAvailable) return;
 
-  // Nukes can only land within your team's allowed nuke zone (own 40% of map)
+  // Team-wide nuke cooldown — prevent stacking
   const team = player.team;
+  if (state.nukeTeamCooldown[team] > 0) return;
+
+  // Nukes can only land within your team's allowed nuke zone (own 40% of map)
   const nukeZone = state.mapDef.nukeZone[team];
   const nukeAxis = state.mapDef.shapeAxis === 'x' ? cmd.x : cmd.y;
   if (nukeAxis < nukeZone.min || nukeAxis > nukeZone.max) return;
 
   player.nukeAvailable = false;
+  state.nukeTeamCooldown[team] = NUKE_TEAM_COOLDOWN_TICKS;
 
   // 1.25 second telegraph before detonation.
   // Radius intentionally set to 16 for large-teamfight impact.
@@ -977,7 +986,7 @@ function tickSpawners(state: GameState): void {
           statusEffects: [], hitCount: 0, shieldHp: 0, category,
           upgradeTier: building.upgradePath.length - 1,
           upgradeNode: building.upgradePath[building.upgradePath.length - 1] ?? 'A',
-          upgradeSpecial: upgrade.special, kills: 0, lastDamagedByName: '',
+          upgradeSpecial: upgrade.special, kills: 0, lastDamagedByName: '', spawnTick: state.tick,
         });
         if (state.playerStats[building.playerId]) state.playerStats[building.playerId].unitsSpawned++;
       }
@@ -992,6 +1001,15 @@ function getEffectiveSpeed(unit: UnitState): number {
     if (eff.type === StatusType.Haste) speed *= 1.3;
   }
   return speed;
+}
+
+/** Get damage with status effect multipliers (Frenzy = +30% damage) */
+function getEffectiveDamage(unit: UnitState): number {
+  let dmg = unit.damage;
+  for (const eff of unit.statusEffects) {
+    if (eff.type === StatusType.Frenzy) dmg = Math.round(dmg * 1.5);
+  }
+  return dmg;
 }
 
 function tickUnitMovement(state: GameState): void {
@@ -1141,6 +1159,7 @@ function applyStatus(target: UnitState, type: StatusType, stacks: number): void 
   const duration = type === StatusType.Burn ? 3 * TICK_RATE :
                    type === StatusType.Slow ? 3 * TICK_RATE :
                    type === StatusType.Haste ? 3 * TICK_RATE :
+                   type === StatusType.Frenzy ? 4 * TICK_RATE :
                    4 * TICK_RATE; // Shield
   if (existing) {
     existing.stacks = Math.min(existing.stacks + stacks, maxStacks);
@@ -1204,7 +1223,31 @@ function dealDamage(state: GameState, target: UnitState, amount: number, showFlo
       const killer = state.units.find(u => u.id === sourceUnitId);
       if (killer) {
         target.lastDamagedByName = killer.type;
-        if (target.hp <= 0) killer.kills++;
+        if (target.hp <= 0) {
+          killer.kills++;
+          // Wild Kill Frenzy: on kill, heal 25% maxHP, nearby Wild allies gain Frenzy (+50% dmg) and Haste
+          const killerRace = state.players[killer.playerId]?.race;
+          if (killerRace === Race.Wild) {
+            // Heal killer on kill (bloodthirst)
+            const healAmt = Math.round(killer.maxHp * 0.25);
+            killer.hp = Math.min(killer.maxHp, killer.hp + healAmt);
+            const frenzyRadius = 6;
+            applyStatus(killer, StatusType.Frenzy, 1);
+            applyStatus(killer, StatusType.Haste, 1);
+            for (const ally of state.units) {
+              if (ally.team !== killer.team || ally.id === killer.id || ally.hp <= 0) continue;
+              if (state.players[ally.playerId]?.race !== Race.Wild) continue;
+              const dx = ally.x - killer.x, dy = ally.y - killer.y;
+              if (dx * dx + dy * dy <= frenzyRadius * frenzyRadius) {
+                applyStatus(ally, StatusType.Frenzy, 1);
+                applyStatus(ally, StatusType.Haste, 1);
+              }
+            }
+            if (state.rng() < 0.25) {
+              addFloatingText(state, killer.x, killer.y - 0.3, 'FRENZY!', '#ff4400');
+            }
+          }
+        }
       }
     } else if (sourcePlayerId !== undefined) {
       target.lastDamagedByName = 'Tower';
@@ -1796,9 +1839,10 @@ function tickCombat(state: GameState): void {
           // Crown (shield caster) doesn't fire AoE projectile
           if (race !== Race.Crown) {
             const aoeRadius = (race === Race.Deep || race === Race.Tenders ? 4 : 3) + (sp?.aoeRadiusBonus ?? 0);
+            const effDmg = getEffectiveDamage(unit);
             state.projectiles.push({
               id: genId(state), x: unit.x, y: unit.y,
-              targetId: target.id, damage: unit.damage,
+              targetId: target.id, damage: effDmg,
               speed: 10, aoeRadius, team: unit.team,
               sourcePlayerId: unit.playerId, sourceUnitId: unit.id,
               extraBurnStacks: sp?.extraBurnStacks,
@@ -1809,9 +1853,10 @@ function tickCombat(state: GameState): void {
           // Demon caster: pure damage AoE, no support
           const sp = unit.upgradeSpecial;
           const aoeRadius = 3 + (sp?.aoeRadiusBonus ?? 0);
+          const effDmg = getEffectiveDamage(unit);
           state.projectiles.push({
             id: genId(state), x: unit.x, y: unit.y,
-            targetId: target.id, damage: unit.damage,
+            targetId: target.id, damage: effDmg,
             speed: 10, aoeRadius, team: unit.team,
             sourcePlayerId: unit.playerId, sourceUnitId: unit.id,
             extraBurnStacks: sp?.extraBurnStacks,
@@ -1821,9 +1866,10 @@ function tickCombat(state: GameState): void {
           // Ranged unit: fire projectile
           const sp = unit.upgradeSpecial;
           const splashR = sp?.splashRadius ?? 0;
+          const effDmg = getEffectiveDamage(unit);
           state.projectiles.push({
             id: genId(state), x: unit.x, y: unit.y,
-            targetId: target.id, damage: unit.damage,
+            targetId: target.id, damage: effDmg,
             speed: 15, aoeRadius: splashR, team: unit.team,
             sourcePlayerId: unit.playerId, sourceUnitId: unit.id,
             extraBurnStacks: sp?.extraBurnStacks,
@@ -1834,7 +1880,7 @@ function tickCombat(state: GameState): void {
           // Multishot: extra projectiles at nearby enemies
           const msCount = sp?.multishotCount ?? 0;
           if (msCount > 0) {
-            const msDmg = Math.round(unit.damage * (sp?.multishotDamagePct ?? 0.5));
+            const msDmg = Math.round(effDmg * (sp?.multishotDamagePct ?? 0.5));
             const nearby = state.units
               .filter(o => o.team !== unit.team && o.id !== target.id && o.hp > 0)
               .map(o => ({ u: o, d: Math.sqrt((o.x - unit.x) ** 2 + (o.y - unit.y) ** 2) }))
@@ -1871,7 +1917,7 @@ function tickCombat(state: GameState): void {
               addCombatEvent(state, { type: 'chain', x: lastX, y: lastY, x2: chainTarget.x, y2: chainTarget.y, color: '#76ff03' });
               state.projectiles.push({
                 id: genId(state), x: lastX, y: lastY,
-                targetId: chainTarget.id, damage: Math.round(unit.damage * chainPct),
+                targetId: chainTarget.id, damage: Math.round(getEffectiveDamage(unit) * chainPct),
                 speed: 20, aoeRadius: 0, team: unit.team,
                 sourcePlayerId: unit.playerId, sourceUnitId: unit.id,
               });
@@ -1904,7 +1950,8 @@ function tickCombat(state: GameState): void {
             }
           }
 
-          dealDamage(state, target, unit.damage, unit.damage >= 5, unit.playerId, unit.id);
+          const meleeDmg = getEffectiveDamage(unit);
+          dealDamage(state, target, meleeDmg, meleeDmg >= 5, unit.playerId, unit.id);
           applyOnHitEffects(state, unit, target);
 
           // Cleave: hit additional adjacent enemies
@@ -1923,7 +1970,7 @@ function tickCombat(state: GameState): void {
               return da - db || a.id - b.id;
             });
             for (let ci = 0; ci < Math.min(cleaveN, cleaved.length); ci++) {
-              const cleaveDmg = Math.round(unit.damage * 0.6);
+              const cleaveDmg = Math.round(meleeDmg * 0.6);
               dealDamage(state, cleaved[ci], cleaveDmg, cleaveDmg >= 5, unit.playerId, unit.id);
               applyOnHitEffects(state, unit, cleaved[ci]);
               addCombatEvent(state, { type: 'chain', x: unit.x, y: unit.y, x2: cleaved[ci].x, y2: cleaved[ci].y, color: '#ff9800' });
@@ -1951,8 +1998,9 @@ function tickCombat(state: GameState): void {
         if (d <= unit.range + 1.5 && d < ntd) { nearestTower = b; ntd = d; }
       }
       if (nearestTower) {
-        nearestTower.hp -= unit.damage;
-        addFloatingText(state, nearestTower.worldX, nearestTower.worldY, `-${unit.damage}`, '#ff6600');
+        const tDmg = getEffectiveDamage(unit);
+        nearestTower.hp -= tDmg;
+        addFloatingText(state, nearestTower.worldX, nearestTower.worldY, `-${tDmg}`, '#ff6600');
         unit.attackTimer = Math.round(unit.attackSpeed * TICK_RATE);
         if (nearestTower.hp <= 0) {
           addFloatingText(state, nearestTower.worldX, nearestTower.worldY, 'DESTROYED', '#ff0000');
@@ -1970,8 +2018,9 @@ function tickCombat(state: GameState): void {
       const hqRadius = Math.max(HQ_WIDTH, HQ_HEIGHT) * 0.5;
       const distToHq = Math.sqrt((unit.x - hqCx) ** 2 + (unit.y - hqCy) ** 2);
       if (distToHq <= unit.range + hqRadius) {
-        state.hqHp[enemyTeam] -= unit.damage;
-        addFloatingText(state, hqCx, hqCy, `-${unit.damage} HQ`, '#ff0000');
+        const hDmg = getEffectiveDamage(unit);
+        state.hqHp[enemyTeam] -= hDmg;
+        addFloatingText(state, hqCx, hqCy, `-${hDmg} HQ`, '#ff0000');
         addSound(state, 'hq_damaged', hqCx, hqCy);
         unit.attackTimer = Math.round(unit.attackSpeed * TICK_RATE);
       }
@@ -2003,6 +2052,7 @@ function tickCombat(state: GameState): void {
       state.fallenHeroes.push({
         name: u.type, playerId: u.playerId, category: u.category,
         kills: u.kills, survived: false, killedByName: u.lastDamagedByName || 'unknown',
+        spawnTick: u.spawnTick, deathTick: state.tick,
       });
     }
   }
@@ -2577,6 +2627,11 @@ function applyTowerSpecial(state: GameState, building: BuildingState, race: Race
 // === Nuke Telegraph ===
 
 function tickNukeTelegraphs(state: GameState): void {
+  // Tick down team nuke cooldowns
+  for (let t = 0; t < state.nukeTeamCooldown.length; t++) {
+    if (state.nukeTeamCooldown[t] > 0) state.nukeTeamCooldown[t]--;
+  }
+
   for (let i = state.nukeTelegraphs.length - 1; i >= 0; i--) {
     const tel = state.nukeTelegraphs[i];
     tel.timer--;
@@ -2879,19 +2934,35 @@ function tickCenterHarvester(state: GameState, h: HarvesterState, movePerTick: n
     }
   }
 
-  const cellIdx = findBestCellToMine(state.diamondCells, cellMap, h.x, h.y);
-  if (cellIdx < 0) {
+  // Validate existing locked target (may have been mined by another harvester)
+  if (h.targetCellIdx >= 0) {
+    const tc = state.diamondCells[h.targetCellIdx];
+    if (!tc || tc.gold <= 0) h.targetCellIdx = -1;
+  }
+
+  // Pick new target only when needed — collect teammate claims for spreading
+  if (h.targetCellIdx < 0) {
+    const claimed = new Set<number>();
+    for (const oh of state.harvesters) {
+      if (oh.id !== h.id && oh.assignment === HarvesterAssignment.Center &&
+          oh.state !== 'dead' && oh.targetCellIdx >= 0) {
+        claimed.add(oh.targetCellIdx);
+      }
+    }
+    h.targetCellIdx = findBestCellToMine(state.diamondCells, cellMap, h.x, h.y, claimed);
+  }
+
+  if (h.targetCellIdx < 0) {
     h.state = 'walking_to_node';
     return;
   }
 
-  const cell = state.diamondCells[cellIdx];
+  const cell = state.diamondCells[h.targetCellIdx];
   const dx = cell.tileX - h.x, dy = cell.tileY - h.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
 
   if (dist < 1.5) {
     h.state = 'mining';
-    h.targetCellIdx = cellIdx;
     h.miningTimer = MINE_TIME_BASE_TICKS;
   } else {
     h.state = 'walking_to_node';
@@ -2972,6 +3043,7 @@ function computeWarHeroes(state: GameState): void {
       candidates.push({
         name: u.type, playerId: u.playerId, category: u.category,
         kills: u.kills, survived: true, killedByName: null,
+        spawnTick: u.spawnTick, deathTick: null,
       });
     }
   }

@@ -429,17 +429,6 @@ export class InputHandler {
         this.nukeTargeting = false;
         return;
       }
-
-      // Right-click on own building to sell
-      const world = this.eventToWorld(e);
-      const tileX = Math.floor(world.x / TILE_SIZE);
-      const tileY = Math.floor(world.y / TILE_SIZE);
-      const building = this.game.state.buildings.find(b =>
-        b.playerId === this.pid && b.worldX === tileX && b.worldY === tileY
-      );
-      if (building) {
-        this.game.sendCommand({ type: 'sell_building', playerId: this.pid, buildingId: building.id });
-      }
     }, sig);
 
     this.canvas.addEventListener('auxclick', (e) => {

@@ -337,12 +337,14 @@ export class PostMatchScene implements Scene {
     ctx.fillText(`${this.slotLabel(hero.playerId)}'s ${categoryIcon}  -  ${hero.kills} kills`, w / 2, y + fontSize * 2.8);
 
     ctx.font = `bold ${fontSize * 0.75}px monospace`;
+    const aliveTime = this.formatTickTime((hero.deathTick ?? state.tick) - hero.spawnTick);
     if (hero.survived) {
       ctx.fillStyle = '#1b6e24';
-      ctx.fillText('Survived the battle', w / 2, y + fontSize * 3.8);
+      ctx.fillText(`Survived the battle  (alive ${aliveTime})`, w / 2, y + fontSize * 3.8);
     } else {
+      const deathTime = this.formatTickTime(hero.deathTick!);
       ctx.fillStyle = '#9a1a1a';
-      ctx.fillText(`Slain by ${hero.killedByName}`, w / 2, y + fontSize * 3.8);
+      ctx.fillText(`Slain by ${hero.killedByName} at ${deathTime}  (alive ${aliveTime})`, w / 2, y + fontSize * 3.8);
     }
   }
 
@@ -353,6 +355,12 @@ export class PostMatchScene implements Scene {
     const diff = this.stats?.slotBotDifficulties?.[String(slotId)];
     if (diff) return `Bot ${diff.charAt(0).toUpperCase() + diff.slice(1)}`;
     return `P${slotId + 1}`;
+  }
+
+  /** Format a tick count as m:ss (20 ticks per second). */
+  private formatTickTime(ticks: number): string {
+    const totalSec = Math.floor(ticks / 20);
+    return `${Math.floor(totalSec / 60)}:${(totalSec % 60).toString().padStart(2, '0')}`;
   }
 
   /** Truncate text to fit within maxWidth, adding ellipsis if needed. */

@@ -1339,8 +1339,9 @@ export class Renderer {
 
       if (sprite) {
         // Draw sprite scaled to fit one tile, anchored at bottom-center
-        // Sprites are taller than wide, so scale by width to fit tile
-        const baseDrawW = T + 4; // slightly larger than tile for visual presence
+        // Scale up slightly per upgrade tier to show leveling
+        const tierScale = 1.0 + upgradeTier * 0.08;
+        const baseDrawW = (T + 4) * tierScale;
         const baseDrawH = (baseDrawW / sprite.width) * sprite.height;
 
         // Construction animation: scale-up bounce
@@ -1379,7 +1380,7 @@ export class Renderer {
           if (unitData) {
             const [unitImg, unitDef] = unitData;
             const spriteScale = unitDef.scale ?? 1.0;
-            const unitSize = T * 1.5 * spriteScale;
+            const unitSize = T * 1.5 * spriteScale * tierScale;
             const aspect = unitDef.frameW / unitDef.frameH;
             const uW = unitSize * aspect;
             const uH = unitSize * (unitDef.heightScale ?? 1.0);
@@ -1422,34 +1423,36 @@ export class Renderer {
           }
         }
       } else {
-        // Fallback: procedural shapes
+        // Fallback: procedural shapes (scale up per tier)
+        const tierScale = 1.0 + upgradeTier * 0.08;
+        const h2 = half * tierScale;
         ctx.fillStyle = 'rgba(20, 20, 20, 0.9)';
         ctx.strokeStyle = playerColor;
         ctx.lineWidth = upgradeTier >= 2 ? 3 : 2;
 
         switch (b.type) {
           case BuildingType.MeleeSpawner:
-            ctx.fillRect(px - half, py - half, half * 2, half * 2);
-            ctx.strokeRect(px - half, py - half, half * 2, half * 2);
+            ctx.fillRect(px - h2, py - h2, h2 * 2, h2 * 2);
+            ctx.strokeRect(px - h2, py - h2, h2 * 2, h2 * 2);
             break;
           case BuildingType.RangedSpawner:
             ctx.beginPath();
-            ctx.moveTo(px, py - half); ctx.lineTo(px + half, py + half); ctx.lineTo(px - half, py + half);
+            ctx.moveTo(px, py - h2); ctx.lineTo(px + h2, py + h2); ctx.lineTo(px - h2, py + h2);
             ctx.closePath(); ctx.fill(); ctx.stroke();
             break;
           case BuildingType.CasterSpawner:
             ctx.beginPath();
             for (let i = 0; i < 5; i++) {
               const a = (i * 2 * Math.PI / 5) - Math.PI / 2;
-              const sx = px + Math.cos(a) * half, sy = py + Math.sin(a) * half;
+              const sx = px + Math.cos(a) * h2, sy = py + Math.sin(a) * h2;
               if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
             }
             ctx.closePath(); ctx.fill(); ctx.stroke();
             break;
           case BuildingType.Tower: {
             ctx.beginPath();
-            ctx.moveTo(px, py - half); ctx.lineTo(px + half, py);
-            ctx.lineTo(px, py + half); ctx.lineTo(px - half, py);
+            ctx.moveTo(px, py - h2); ctx.lineTo(px + h2, py);
+            ctx.lineTo(px, py + h2); ctx.lineTo(px - h2, py);
             ctx.closePath(); ctx.fill();
             ctx.strokeStyle = rc.primary;
             ctx.stroke();
@@ -1465,7 +1468,7 @@ export class Renderer {
             break;
           }
           case BuildingType.HarvesterHut: {
-            ctx.beginPath(); ctx.arc(px, py, half, 0, Math.PI * 2);
+            ctx.beginPath(); ctx.arc(px, py, h2, 0, Math.PI * 2);
             ctx.fill(); ctx.strokeStyle = '#ffd700'; ctx.stroke();
             const harv = state.harvesters.find(h => h.hutId === b.id);
             if (harv) {

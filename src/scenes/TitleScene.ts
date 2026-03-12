@@ -8,7 +8,7 @@ import { PartyManager, PartyState, PartyPlayer, getPartyPlayerCount } from '../n
 import { isFirebaseConfigured, initFirebase } from '../network/FirebaseService';
 import { PlayerProfile, ALL_AVATARS, loadProfile } from '../profile/ProfileData';
 import { BotDifficultyLevel } from '../simulation/BotAI';
-import { getMapById, ALL_MAPS } from '../simulation/maps';
+import { getMapById, ALL_MAPS, DUEL_MAP } from '../simulation/maps';
 import { SoundManager } from '../audio/SoundManager';
 import { MusicPlayer } from '../audio/MusicPlayer';
 import { getAudioSettings, subscribeToAudioSettings, updateAudioSettings } from '../audio/AudioSettings';
@@ -38,6 +38,36 @@ const LOCAL_SETUP_KEY = 'spawnwars.localSetup';
 
 function saveLocalSetup(setup: LocalSetup): void {
   try { localStorage.setItem(LOCAL_SETUP_KEY, JSON.stringify(setup)); } catch {}
+}
+
+function loadLocalSetup(): LocalSetup | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_SETUP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Validate it has required fields
+    if (parsed && typeof parsed.mapId === 'string' && typeof parsed.playerSlot === 'number') {
+      return parsed as LocalSetup;
+    }
+  } catch {}
+  return null;
+}
+
+function createDefaultLocalSetup(): LocalSetup {
+  const mapDef = DUEL_MAP;
+  const ppt = mapDef.playersPerTeam;
+  // Fill enemy team with Medium bots
+  const bots: { [slot: string]: string } = {};
+  for (let i = ppt; i < mapDef.maxPlayers; i++) {
+    bots[String(i)] = 'medium';
+  }
+  return {
+    mapId: mapDef.id,
+    maxSlots: mapDef.maxPlayers,
+    bots,
+    playerSlot: 0,
+    playerRace: 'random',
+  };
 }
 
 /** Check if each team has at least 1 occupied slot (player or bot). */
@@ -1258,7 +1288,7 @@ export class TitleScene implements Scene {
       return;
     }
     if (this.hitRect(cx, cy, btns.create)) {
-      this.doCreateParty();
+      this.localSetup = loadLocalSetup() ?? createDefaultLocalSetup();
       return;
     }
     if (this.hitRect(cx, cy, btns.gallery)) {
@@ -1318,19 +1348,6 @@ export class TitleScene implements Scene {
       console.error('[Party] Find game failed:', e);
       this.showPartyError(e.message || 'Failed to find game');
       this.matchmaking = false;
-    }
-  }
-
-  private async doCreateParty(): Promise<void> {
-    if (this.matchmaking) return;
-    try {
-      await this.ensureFirebase();
-      this.party!.localName = this.playerName;
-      await this.party!.createParty(Race.Crown);
-      // partyListener will set this.partyState → shows party panel with code
-    } catch (e: any) {
-      console.error('[Party] Create party failed:', e);
-      this.showPartyError(e.message || 'Failed to create party');
     }
   }
 
@@ -1480,9 +1497,16 @@ export class TitleScene implements Scene {
 
     for (let i = 0; i < this.duelTeamSize; i++) {
       const blueRace = ALL_RACES[Math.floor(Math.random() * ALL_RACES.length)];
-      const redRace = ALL_RACES[Math.floor(Math.random() * ALL_RACES.length)];
       const blueType = UNIT_TYPES[Math.floor(Math.random() * UNIT_TYPES.length)];
-      const redType = UNIT_TYPES[Math.floor(Math.random() * UNIT_TYPES.length)];
+      // Ensure red side differs from blue (re-roll if same race+type)
+      let redRace = ALL_RACES[Math.floor(Math.random() * ALL_RACES.length)];
+      let redType = UNIT_TYPES[Math.floor(Math.random() * UNIT_TYPES.length)];
+      let rerolls = 0;
+      while (redRace === blueRace && redType === blueType && rerolls < 10) {
+        redRace = ALL_RACES[Math.floor(Math.random() * ALL_RACES.length)];
+        redType = UNIT_TYPES[Math.floor(Math.random() * UNIT_TYPES.length)];
+        rerolls++;
+      }
 
       const bluePath = pickUpgradePath(this.duelTier);
       const redPath = pickUpgradePath(this.duelTier);
@@ -1954,10 +1978,10 @@ export class TitleScene implements Scene {
       if (r1 > 0) this.drawSwordLabel(ctx, btns.findGame, 'FIND GAME', r1, ox1);
     }
 
-    // CREATE PARTY — yellow sword
+    // CUSTOM GAME — yellow sword
     const r2 = r(2);
     const ox2 = this.ui.drawSword(ctx, btns.create.x, btns.create.y, btns.create.w, btns.create.h, 2, r2);
-    if (r2 > 0) this.drawSwordLabel(ctx, btns.create, 'CREATE PARTY', r2, ox2);
+    if (r2 > 0) this.drawSwordLabel(ctx, btns.create, 'CUSTOM GAME', r2, ox2);
 
     // JOIN PARTY — purple sword
     const r3 = r(3);

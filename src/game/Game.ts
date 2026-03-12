@@ -210,6 +210,10 @@ export class Game {
     this.input.destroy();
     this.renderer.camera.destroy();
     if (this.commandSync) {
+      // Only delete game data if match ended naturally (not mid-game quit)
+      if (this.state.matchPhase === 'ended') {
+        this.commandSync.cleanup();
+      }
       this.commandSync.stop();
       this.commandSync = null;
     }

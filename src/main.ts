@@ -8,7 +8,7 @@ import { UnitGalleryScene } from './scenes/UnitGalleryScene';
 import { recordMatch } from './util/BalanceTracker';
 import { SpriteLoader } from './rendering/SpriteLoader';
 import { UIAssets } from './rendering/UIAssets';
-import { Race } from './simulation/types';
+import { Race, createSeededRng } from './simulation/types';
 import { BotDifficultyLevel } from './simulation/BotAI';
 import { getMapById } from './simulation/maps';
 import { ProfileScene } from './profile/ProfileScene';
@@ -93,12 +93,14 @@ uiReady.then(() => {
     const difficulty = (party.difficulty as BotDifficultyLevel) ?? BotDifficultyLevel.Medium;
     const allRaces = [Race.Crown, Race.Horde, Race.Goblins, Race.Oozlings, Race.Demon, Race.Deep, Race.Wild, Race.Geists, Race.Tenders];
     // Build human player list from party slots, resolve random races
+    // Use seeded RNG so all clients resolve the same random races
+    const raceRng = createSeededRng(party.seed);
     const humanPlayers: { slot: number; race: Race }[] = [];
     for (let i = 0; i < party.maxSlots; i++) {
       const p = party.players[String(i)];
       if (p) {
         const race = (p.race as string) === 'random'
-          ? allRaces[Math.floor(Math.random() * allRaces.length)]
+          ? allRaces[Math.floor(raceRng() * allRaces.length)]
           : p.race;
         humanPlayers.push({ slot: i, race });
       }
