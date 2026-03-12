@@ -1288,7 +1288,7 @@ export class TitleScene implements Scene {
       return;
     }
     if (this.hitRect(cx, cy, btns.create)) {
-      this.localSetup = loadLocalSetup() ?? createDefaultLocalSetup();
+      this.doCreateParty();
       return;
     }
     if (this.hitRect(cx, cy, btns.gallery)) {
@@ -1348,6 +1348,18 @@ export class TitleScene implements Scene {
       console.error('[Party] Find game failed:', e);
       this.showPartyError(e.message || 'Failed to find game');
       this.matchmaking = false;
+    }
+  }
+
+  private async doCreateParty(): Promise<void> {
+    try {
+      await this.ensureFirebase();
+      this.party!.localName = this.playerName;
+      await this.party!.createParty(Race.Crown);
+    } catch (e: any) {
+      console.error('[Party] Create failed:', e);
+      // Fall back to local setup if Firebase isn't available
+      this.localSetup = loadLocalSetup() ?? createDefaultLocalSetup();
     }
   }
 
