@@ -1,5 +1,23 @@
 import { defineConfig } from 'vite';
+import { execSync } from 'child_process';
 
-export default defineConfig({
-  base: '/SpawnWars/',
+function gitInfo() {
+  try {
+    const hash = execSync('git rev-parse --short HEAD').toString().trim();
+    const count = execSync('git rev-list --count HEAD').toString().trim();
+    return { hash, count };
+  } catch {
+    return { hash: 'dev', count: '0' };
+  }
+}
+
+export default defineConfig(() => {
+  const git = gitInfo();
+  return {
+    base: '/SpawnWars/',
+    define: {
+      __BUILD_HASH__: JSON.stringify(git.hash),
+      __BUILD_NUMBER__: JSON.stringify(git.count),
+    },
+  };
 });

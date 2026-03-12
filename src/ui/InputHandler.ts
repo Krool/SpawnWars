@@ -6,7 +6,7 @@ import {
   HarvesterAssignment, Team, Race, UnitState,
 } from '../simulation/types';
 import { getBuildGridOrigin, getTeamAlleyOrigin, getHutGridOrigin } from '../simulation/GameState';
-import { RACE_BUILDING_COSTS, UNIT_STATS, TOWER_STATS, RACE_COLORS, getRaceUsedResources } from '../simulation/data';
+import { RACE_BUILDING_COSTS, UNIT_STATS, TOWER_STATS, RACE_COLORS, getRaceUsedResources, UPGRADE_TREES } from '../simulation/data';
 import { TICK_RATE } from '../simulation/types';
 import { UIAssets } from '../rendering/UIAssets';
 import { SpriteLoader, drawSpriteFrame, getSpriteFrame } from '../rendering/SpriteLoader';
@@ -1531,7 +1531,23 @@ export class InputHandler {
 
   private getUnitTooltip(u: UnitState): string {
     const teamLabel = u.team === this.myTeam ? 'Ally' : 'Enemy';
-    let tip = `${u.type} (${teamLabel} ${u.category})  HP: ${u.hp}/${u.maxHp}`;
+    // Look up upgrade node name if unit has been upgraded
+    let name = u.type;
+    if (u.upgradeNode && u.upgradeNode !== 'A') {
+      const race = this.game.state.players[u.playerId]?.race;
+      if (race != null) {
+        const catToBld: Record<string, BuildingType> = {
+          melee: BuildingType.MeleeSpawner,
+          ranged: BuildingType.RangedSpawner,
+          caster: BuildingType.CasterSpawner,
+        };
+        const bld = catToBld[u.category];
+        const tree = bld && (UPGRADE_TREES as any)[race]?.[bld]?.[u.upgradeNode];
+        const nodeName = tree?.name as string | undefined;
+        if (nodeName) name = nodeName;
+      }
+    }
+    let tip = `${name} (${teamLabel} ${u.category})  HP: ${u.hp}/${u.maxHp}`;
     if (u.shieldHp > 0) tip += ` +${u.shieldHp} shield`;
     return tip;
   }

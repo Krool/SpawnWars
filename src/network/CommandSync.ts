@@ -63,6 +63,9 @@ export class CommandSync {
   onDesync: DesyncCallback | null = null;
   onDisconnect: DisconnectCallback | null = null;
 
+  /** Human-readable connection status for debugging. */
+  status = 'created';
+
   /** Current estimated round-trip latency in ms. */
   get latencyMs(): number { return this._latencyMs; }
 
@@ -92,7 +95,8 @@ export class CommandSync {
 
   /** Initialize Firebase listeners and exchange ready signals. */
   start(): void {
-    console.log(`[CommandSync] Starting as slot ${this.localSlotId}, humans=${this.allHumanSlots.join(',')}, party=${this.partyCode}`);
+    this.status = `starting slot=${this.localSlotId} humans=${this.allHumanSlots.join(',')}`;
+    console.log(`[CommandSync] ${this.status}, party=${this.partyCode}`);
 
     const db = getDb();
     const gameRef = `games/${this.partyCode}`;
@@ -101,7 +105,8 @@ export class CommandSync {
     this.connectionTimeout = setTimeout(() => {
       if (!this.connected && !this._settled) {
         this._settled = true;
-        console.error('[CommandSync] Connection timeout');
+        this.status = `timeout waiting=${this.allHumanSlots.filter(id => !this.readyPlayers.has(id)).join(',')}`;
+        console.error(`[CommandSync] ${this.status}`);
         this._connectedReject(new Error('Connection timeout'));
         this.onDisconnect?.();
       }
@@ -111,7 +116,14 @@ export class CommandSync {
     onDisconnect(ref(db, `${gameRef}/ready/${this.localSlotId}`)).remove();
 
     // Write our ready signal
-    set(ref(db, `${gameRef}/ready/${this.localSlotId}`), true);
+    this.status = `writing ready for slot ${this.localSlotId}`;
+    set(ref(db, `${gameRef}/ready/${this.localSlotId}`), true).then(() => {
+      this.status = `ready written, waiting=${this.allHumanSlots.filter(id => !this.readyPlayers.has(id)).join(',')}`;
+      console.log(`[CommandSync] ${this.status}`);
+    }).catch((err) => {
+      this.status = `ready write FAILED: ${err.message}`;
+      console.error(`[CommandSync] ${this.status}`);
+    });
     this.readyPlayers.add(this.localSlotId);
 
     // Listen for each remote player's ready signal
@@ -119,12 +131,16 @@ export class CommandSync {
       const readyUnsub = onValue(ref(db, `${gameRef}/ready/${remoteId}`), (snap) => {
         if (snap.val() === true && !this.readyPlayers.has(remoteId)) {
           this.readyPlayers.add(remoteId);
+          const waiting = this.allHumanSlots.filter(id => !this.readyPlayers.has(id));
+          this.status = waiting.length > 0 ? `got slot ${remoteId}, waiting=${waiting.join(',')}` : 'all ready';
+          console.log(`[CommandSync] ${this.status}`);
           this.checkAllReady();
         }
         if (snap.val() === null && this.connected) {
           // Remote player disconnected
           this.connected = false;
-          console.warn(`[CommandSync] Player ${remoteId} disconnected`);
+          this.status = `slot ${remoteId} disconnected`;
+          console.warn(`[CommandSync] ${this.status}`);
           this.onDisconnect?.();
         }
       });
@@ -145,6 +161,7 @@ export class CommandSync {
         clearTimeout(this.connectionTimeout);
         this.connectionTimeout = null;
       }
+      this.status = 'connected';
       console.log(`[CommandSync] All ${this.allHumanSlots.length} peers ready — game can start`);
       this._connectedResolve();
     }

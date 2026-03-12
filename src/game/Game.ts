@@ -187,21 +187,50 @@ export class Game {
 
   start(): void {
     if (this.isMultiplayer && this.commandSync) {
+      // Show "Connecting..." while waiting for handshake, refresh periodically
+      this.waitingForAllyMs = 1;
+      this.drawConnectingScreen();
+      const connectingInterval = setInterval(() => this.drawConnectingScreen(), 500);
       // Wait for P2P connection + handshake before starting game loop
       this.commandSync.whenReady().then(() => {
+        clearInterval(connectingInterval);
         console.log('[Game] P2P ready, starting game loop');
+        this.waitingForAllyMs = 0;
         // Pre-seed turn 0 so the first tick doesn't stall
         this.turnCommands.set(0, []);
         this.loop.start();
       }).catch((err) => {
+        clearInterval(connectingInterval);
         console.error('[Game] P2P connection failed:', err);
         this.peerDisconnected = true;
+        this.waitingForAllyMs = 0;
         // Start loop anyway so the disconnect warning renders
         this.loop.start();
       });
     } else {
       this.loop.start();
     }
+  }
+
+  /** Draw a simple connecting screen before the game loop starts. */
+  private drawConnectingScreen(): void {
+    const canvas = this.renderer.canvas;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, w, h);
+    ctx.font = 'bold 24px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffd740';
+    ctx.fillText('Connecting to opponent...', w / 2, h / 2);
+    // Show sync status for debugging
+    const status = this.commandSync?.status ?? 'no sync';
+    ctx.font = '14px monospace';
+    ctx.fillStyle = '#888';
+    ctx.fillText(status, w / 2, h / 2 + 36);
   }
 
   stop(): void {

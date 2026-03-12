@@ -1957,7 +1957,7 @@ export class TitleScene implements Scene {
     ctx.textBaseline = 'alphabetic';
     ctx.font = `${Math.max(10, Math.min(w / 60, 14))}px monospace`;
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.fillText('v0.1.0 - dev build', w / 2, h - 12);
+    ctx.fillText(`build ${__BUILD_NUMBER__} (${__BUILD_HASH__})`, w / 2, h - 12);
   }
 
   // ─── Render: Main menu buttons ───
