@@ -10,6 +10,8 @@ export interface MatchStats {
   slotNames?: { [slot: string]: string };
   /** Per-slot bot difficulty (absent = human). */
   slotBotDifficulties?: { [slot: string]: string };
+  /** True if this was a party/custom game — continue returns to lobby instead of race select. */
+  wasPartyGame?: boolean;
 }
 
 export class PostMatchScene implements Scene {
@@ -35,16 +37,18 @@ export class PostMatchScene implements Scene {
   enter(): void {
     this.animTime = 0;
 
+    const continueTarget = this.stats?.wasPartyGame ? 'title' : 'raceSelect';
+
     this.clickHandler = (e) => {
       const rect = this.canvas.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
-      if (this.isButtonAt(cx, cy)) this.manager.switchTo('raceSelect');
+      if (this.isButtonAt(cx, cy)) this.manager.switchTo(continueTarget);
     };
 
     this.keyHandler = (e) => {
       if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
-        this.manager.switchTo('raceSelect');
+        this.manager.switchTo(continueTarget);
       }
     };
 
@@ -55,7 +59,7 @@ export class PostMatchScene implements Scene {
       const rect = this.canvas.getBoundingClientRect();
       const cx = touch.clientX - rect.left;
       const cy = touch.clientY - rect.top;
-      if (this.isButtonAt(cx, cy)) this.manager.switchTo('raceSelect');
+      if (this.isButtonAt(cx, cy)) this.manager.switchTo(continueTarget);
     };
 
     this.canvas.addEventListener('click', this.clickHandler);
@@ -264,16 +268,16 @@ export class PostMatchScene implements Scene {
     const barW = Math.min(140, panelW * 0.18);
     const barH = 18;
     const barGap = 30;
-    const ourHp = state.hqHp[localTeam];
+    const ourHp = Math.max(0, state.hqHp[localTeam]);
     const enemyTeam = localTeam === Team.Bottom ? Team.Top : Team.Bottom;
-    const enemyHp = state.hqHp[enemyTeam];
+    const enemyHp = Math.max(0, state.hqHp[enemyTeam]);
     this.ui.drawBar(ctx, w / 2 - barW - barGap, hqY + 8, barW, barH, ourHp / 1000);
     ctx.fillStyle = '#1a4a8a';
     ctx.font = `bold ${fontSize * 0.8}px monospace`;
-    ctx.fillText(`US ${ourHp}`, w / 2 - barW / 2 - barGap, hqY + 34);
+    ctx.fillText(`US ${ourHp}`, w / 2 - barW / 2 - barGap, hqY + 38);
     this.ui.drawBar(ctx, w / 2 + barGap, hqY + 8, barW, barH, enemyHp / 1000);
     ctx.fillStyle = '#a01020';
-    ctx.fillText(`ENEMY ${enemyHp}`, w / 2 + barW / 2 + barGap, hqY + 34);
+    ctx.fillText(`ENEMY ${enemyHp}`, w / 2 + barW / 2 + barGap, hqY + 38);
 
     // Awards
     const awards = this.computeAwards(pStats);

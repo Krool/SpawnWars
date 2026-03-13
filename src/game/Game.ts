@@ -45,7 +45,7 @@ export class Game {
   // Multiplayer state
   private commandSync: CommandSync | null = null;
   private localPlayerId = 0;
-  private isMultiplayer = false;
+  isMultiplayer = false;
   // Player commands collected during current turn, to be sent at next turn boundary
   private localCommandBuffer: GameCommand[] = [];
   // Pre-fetched turn commands: turnNumber → merged commands from both players

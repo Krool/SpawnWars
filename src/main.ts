@@ -56,23 +56,27 @@ uiReady.then(() => {
       const def = ACHIEVEMENTS.find(a => a.id === achId);
       if (def) manager.showToast(`Achievement: ${def.name}`, def.desc);
     }
+    const wasParty = game.isMultiplayer;
     postMatchScene.setStats({
       state: game.state,
       localPlayerId: game.playerSlot,
       slotNames: game.slotNames,
       slotBotDifficulties: game.slotBotDifficulties,
+      wasPartyGame: wasParty,
     });
-    // Clean up party data from Firebase when match ends
-    if (titleScene.party) {
+    // Party games: reset to lobby. Solo games: clean up party.
+    if (wasParty && titleScene.party) {
+      titleScene.party.resetToWaiting();
+    } else if (titleScene.party) {
       titleScene.party.leaveParty();
     }
     manager.switchTo('postMatch');
   });
 
   matchScene.setOnQuitGame(() => {
-    // Clean up party data from Firebase on quit
-    if (titleScene.party) {
-      titleScene.party.leaveParty();
+    // Reset party to lobby if in a party game, so players stay together
+    if (titleScene.party?.state) {
+      titleScene.party.resetToWaiting();
     }
     manager.switchTo('title');
   });

@@ -286,6 +286,14 @@ export class PartyManager {
     await update(ref(db), updates);
   }
 
+  /** Reset party status to 'waiting' so the lobby can start a new game. Host only. */
+  async resetToWaiting(): Promise<void> {
+    if (!this.partyCode || !this._state || !this._isHost) return;
+    await set(ref(getDb(), `parties/${this.partyCode}/status`), 'waiting');
+    // Generate a new seed for the next match
+    await set(ref(getDb(), `parties/${this.partyCode}/seed`), Math.floor(Math.random() * 2147483647));
+  }
+
   async startGame(): Promise<void> {
     if (!this.partyCode || !this._state) return;
     if (!this.isHost) return;
