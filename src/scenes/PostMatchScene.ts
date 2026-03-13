@@ -2,6 +2,7 @@ import { Scene, SceneManager } from './Scene';
 import { GameState, Team, PlayerStats } from '../simulation/types';
 import { PLAYER_COLORS, RACE_COLORS } from '../simulation/data';
 import { UIAssets } from '../rendering/UIAssets';
+import { SpriteLoader, getSpriteFrame } from '../rendering/SpriteLoader';
 
 export interface MatchStats {
   state: GameState;
@@ -18,16 +19,18 @@ export class PostMatchScene implements Scene {
   private manager: SceneManager;
   private canvas: HTMLCanvasElement;
   private ui: UIAssets;
+  private sprites: SpriteLoader;
   private stats: MatchStats | null = null;
   private animTime = 0;
   private clickHandler: ((e: MouseEvent) => void) | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private touchHandler: ((e: TouchEvent) => void) | null = null;
 
-  constructor(manager: SceneManager, canvas: HTMLCanvasElement, ui: UIAssets) {
+  constructor(manager: SceneManager, canvas: HTMLCanvasElement, ui: UIAssets, sprites: SpriteLoader) {
     this.manager = manager;
     this.canvas = canvas;
     this.ui = ui;
+    this.sprites = sprites;
   }
 
   setStats(stats: MatchStats): void {
@@ -308,10 +311,11 @@ export class PostMatchScene implements Scene {
       ctx.textAlign = 'center';
       ctx.globalAlpha = rv;
       const btnTextX = btn.x + btn.w * 0.52 + ox;
+      const btnLabel = this.stats?.wasPartyGame ? 'LOBBY' : 'CONTINUE';
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillText('CONTINUE', btnTextX + 1, btn.y + btn.h * 0.58 + 1);
+      ctx.fillText(btnLabel, btnTextX + 1, btn.y + btn.h * 0.58 + 1);
       ctx.fillStyle = '#fff';
-      ctx.fillText('CONTINUE', btnTextX, btn.y + btn.h * 0.58);
+      ctx.fillText(btnLabel, btnTextX, btn.y + btn.h * 0.58);
       ctx.globalAlpha = 1;
     }
   }
@@ -322,7 +326,26 @@ export class PostMatchScene implements Scene {
 
     const hero = heroes[0];
     const playerColor = PLAYER_COLORS[hero.playerId];
-    const raceColor = RACE_COLORS[state.players[hero.playerId]?.race]?.primary ?? '#fff';
+    const raceColor = RACE_COLORS[hero.race]?.primary ?? '#fff';
+
+    // Animated sprite
+    const spriteSize = fontSize * 4;
+    const spriteResult = this.sprites.getUnitSprite(
+      hero.race, hero.category as any, hero.playerId, false, hero.upgradeNode,
+    );
+    if (spriteResult) {
+      const [img, def] = spriteResult;
+      const tick = Math.floor(this.animTime * 20); // convert real seconds to ~20fps ticks
+      const frame = getSpriteFrame(tick, def);
+      const sx = frame * def.frameW;
+      const scale = def.scale ?? 1.0;
+      const drawW = spriteSize * scale;
+      const drawH = spriteSize * scale * (def.heightScale ?? 1.0);
+      const spriteX = w / 2 - drawW / 2;
+      const spriteY = y - fontSize * 0.5;
+      ctx.drawImage(img, sx, 0, def.frameW, def.frameH, spriteX, spriteY, drawW, drawH);
+      y += drawH + fontSize * 0.3;
+    }
 
     // Shield icon + title
     this.ui.drawIcon(ctx, 'shield', w / 2 - fontSize * 0.5, y - fontSize * 0.8, fontSize * 1.0);
