@@ -695,6 +695,7 @@ export class TitleScene implements Scene {
   private partyState: PartyState | null = null;
   private partyError: string = '';
   private partyErrorTimer = 0;
+  private copyFeedbackTimer = 0;
   private matchmaking = false; // true while searching for a game
   private matchmakingDots = 0;
   private joinCodeInput: string = '';
@@ -837,8 +838,8 @@ export class TitleScene implements Scene {
         return;
       }
 
-      // Firebase party drag
-      if (!this.partyState || !this.party?.isHost) return;
+      // Firebase party drag (not during matchmaking)
+      if (!this.partyState || !this.party?.isHost || this.matchmaking) return;
       const pl = this.getPartyLayout();
       for (let i = 0; i < (this.partyState.maxSlots ?? 4); i++) {
         const sr = pl.slotRects[i];
@@ -1196,8 +1197,8 @@ export class TitleScene implements Scene {
       return;
     }
 
-    // If in a party, handle party UI
-    if (this.partyState) {
+    // If in a party (but not matchmaking), handle party UI
+    if (this.partyState && !this.matchmaking) {
       const pl = this.getPartyLayout();
       const ps = this.partyState;
       const isHost = this.party?.isHost;
@@ -1244,6 +1245,7 @@ export class TitleScene implements Scene {
       // Click invite code to copy
       if (this.hitRect(cx, cy, pl.code)) {
         navigator.clipboard?.writeText(this.partyState.code).catch(() => {});
+        this.copyFeedbackTimer = 120; // ~2s at 60fps
         return;
       }
       return;
@@ -1284,7 +1286,11 @@ export class TitleScene implements Scene {
       return;
     }
     if (this.hitRect(cx, cy, btns.findGame)) {
-      this.doFindGame();
+      if (this.matchmaking) {
+        this.cancelMatchmaking();
+      } else {
+        this.doFindGame();
+      }
       return;
     }
     if (this.hitRect(cx, cy, btns.create)) {
@@ -1348,6 +1354,14 @@ export class TitleScene implements Scene {
       console.error('[Party] Find game failed:', e);
       this.showPartyError(e.message || 'Failed to find game');
       this.matchmaking = false;
+    }
+  }
+
+  private cancelMatchmaking(): void {
+    this.matchmaking = false;
+    // Leave the background party we created while searching
+    if (this.party && this.partyState) {
+      this.party.leaveParty();
     }
   }
 
@@ -1552,6 +1566,7 @@ export class TitleScene implements Scene {
     this.animTime += dtSec;
 
     if (this.partyErrorTimer > 0) this.partyErrorTimer -= dtSec;
+    if (this.copyFeedbackTimer > 0) this.copyFeedbackTimer--;
 
     // Animate win announcement
     if (this.winTimer > 0) {
@@ -1920,7 +1935,7 @@ export class TitleScene implements Scene {
     // === Buttons or Party Panel ===
     if (this.localSetup) {
       this.renderLocalSetupPanel(ctx, w, h);
-    } else if (this.partyState) {
+    } else if (this.partyState && !this.matchmaking) {
       this.renderPartyPanel(ctx, w, h);
     } else if (this.joinInputActive) {
       this.renderJoinInput(ctx, w, h);
@@ -2462,10 +2477,17 @@ export class TitleScene implements Scene {
     ctx.fillStyle = '#fff';
     ctx.fillText(codeStr, w / 2, codeTxtY);
 
-    // Tap to copy hint
+    // Tap to copy hint / copied feedback
     ctx.font = `${Math.max(8, fontSize * 0.7)}px monospace`;
-    ctx.fillStyle = 'rgba(255,255,255,0.45)';
-    ctx.fillText('tap code to copy', w / 2, codeRibY + codeRibH + 8);
+    if (this.copyFeedbackTimer > 0) {
+      const fadeIn = Math.min(1, (120 - this.copyFeedbackTimer) / 10);
+      const floatY = (1 - this.copyFeedbackTimer / 120) * -6;
+      ctx.fillStyle = `rgba(100,255,100,${fadeIn * 0.9})`;
+      ctx.fillText('copied to clipboard!', w / 2, codeRibY + codeRibH + 8 + floatY);
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.fillText('tap code to copy', w / 2, codeRibY + codeRibH + 8);
+    }
 
     // Map toggle (host only)
     {

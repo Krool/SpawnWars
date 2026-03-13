@@ -44,7 +44,7 @@ uiReady.then(() => {
   const profile = loadProfile();
   const titleScene = new TitleScene(manager, canvas, sharedUI, sharedSprites, musicPlayer);
   titleScene.profile = profile;
-  const postMatchScene = new PostMatchScene(manager, canvas, sharedUI);
+  const postMatchScene = new PostMatchScene(manager, canvas, sharedUI, sharedSprites);
 
   // Track selected race between scenes
   let selectedRace: Race = Race.Crown;

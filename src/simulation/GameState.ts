@@ -2050,7 +2050,8 @@ function tickCombat(state: GameState): void {
     // Record fallen heroes (units with kills)
     if (u.kills > 0) {
       state.fallenHeroes.push({
-        name: u.type, playerId: u.playerId, category: u.category,
+        name: u.type, playerId: u.playerId, race: state.players[u.playerId].race,
+        category: u.category, upgradeNode: u.upgradeNode,
         kills: u.kills, survived: false, killedByName: u.lastDamagedByName || 'unknown',
         spawnTick: u.spawnTick, deathTick: state.tick,
       });
@@ -3041,7 +3042,8 @@ function computeWarHeroes(state: GameState): void {
   for (const u of state.units) {
     if (u.kills > 0) {
       candidates.push({
-        name: u.type, playerId: u.playerId, category: u.category,
+        name: u.type, playerId: u.playerId, race: state.players[u.playerId].race,
+        category: u.category, upgradeNode: u.upgradeNode,
         kills: u.kills, survived: true, killedByName: null,
         spawnTick: u.spawnTick, deathTick: null,
       });

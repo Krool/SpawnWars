@@ -341,7 +341,9 @@ export interface UnitState {
 export interface WarHero {
   name: string;         // unit type name (e.g. "Volt Runner")
   playerId: number;
+  race: Race;
   category: 'melee' | 'ranged' | 'caster';
+  upgradeNode: string;  // terminal upgrade node key ('A','B',...)
   kills: number;
   survived: boolean;
   killedByName: string | null; // name of the unit/source that killed it, null if survived
