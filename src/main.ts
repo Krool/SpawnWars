@@ -96,6 +96,9 @@ uiReady.then(() => {
     // Use seeded RNG so all clients resolve the same random races
     const raceRng = createSeededRng(party.seed);
     const humanPlayers: { slot: number; race: Race }[] = [];
+    console.log('[PartyStart] maxSlots:', party.maxSlots, 'localSlot:', localSlot);
+    console.log('[PartyStart] players keys:', Object.keys(party.players), 'players:', JSON.stringify(party.players));
+    console.log('[PartyStart] bots:', JSON.stringify(party.bots));
     for (let i = 0; i < party.maxSlots; i++) {
       const p = party.players[String(i)];
       if (p) {
@@ -105,6 +108,7 @@ uiReady.then(() => {
         humanPlayers.push({ slot: i, race });
       }
     }
+    console.log('[PartyStart] humanPlayers:', JSON.stringify(humanPlayers));
     // Build slot names from party players
     const slotNames: { [slot: string]: string } = {};
     for (let i = 0; i < party.maxSlots; i++) {

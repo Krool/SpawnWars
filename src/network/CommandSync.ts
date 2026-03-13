@@ -95,7 +95,7 @@ export class CommandSync {
 
   /** Initialize Firebase listeners and exchange ready signals. */
   start(): void {
-    this.status = `starting slot=${this.localSlotId} humans=${this.allHumanSlots.join(',')}`;
+    this.status = `starting slot=${this.localSlotId} humans=[${this.allHumanSlots.join(',')}] remotes=[${this.remoteSlotIds.join(',')}]`;
     console.log(`[CommandSync] ${this.status}, party=${this.partyCode}`);
 
     const db = getDb();
@@ -128,7 +128,9 @@ export class CommandSync {
 
     // Listen for each remote player's ready signal
     for (const remoteId of this.remoteSlotIds) {
+      console.log(`[CommandSync] Listening for ready at ${gameRef}/ready/${remoteId}`);
       const readyUnsub = onValue(ref(db, `${gameRef}/ready/${remoteId}`), (snap) => {
+        console.log(`[CommandSync] ready/${remoteId} snap:`, snap.val());
         if (snap.val() === true && !this.readyPlayers.has(remoteId)) {
           this.readyPlayers.add(remoteId);
           const waiting = this.allHumanSlots.filter(id => !this.readyPlayers.has(id));
