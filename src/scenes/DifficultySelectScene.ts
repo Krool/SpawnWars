@@ -274,11 +274,12 @@ export class DifficultySelectScene implements Scene {
 
   private getMapCardLayout(): { x: number; y: number; w: number; h: number }[] {
     const w = this.canvas.clientWidth;
-    const gap = 10;
-    const cardW = Math.min(w * 0.8, 420);
-    const cardH = 72;
+    const compact = this.compact;
+    const gap = compact ? 4 : 10;
+    const cardW = Math.min(w * 0.9, 420);
+    const cardH = compact ? 42 : 72;
     const startX = (w - cardW) / 2;
-    const startY = 58;
+    const startY = compact ? 48 : 58;
 
     return MAP_OPTIONS.map((_, i) => ({
       x: startX,
@@ -291,14 +292,16 @@ export class DifficultySelectScene implements Scene {
   private getCardLayout(): { x: number; y: number; w: number; h: number }[] {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
-    const cardW = Math.min(w * 0.8, 420);
-    const gap = 10;
+    const compact = this.compact;
+    const cardW = Math.min(w * 0.9, 420);
+    const gap = compact ? 4 : 10;
     const mapCards = this.getMapCardLayout();
     const mapBottom = Math.max(...mapCards.map((card) => card.y + card.h));
-    const topMargin = mapBottom + 14;
+    const topMargin = mapBottom + (compact ? 6 : 14);
     const heights = this.getDifficultyCardHeights(cardW);
     const totalH = heights.reduce((sum, cardH) => sum + cardH, 0) + (DIFFICULTIES.length - 1) * gap;
-    const startY = topMargin + (h - topMargin - 80 - totalH) / 2;
+    const btnSpace = compact ? 56 : 80;
+    const startY = topMargin + Math.max(0, (h - topMargin - btnSpace - totalH) / 2);
     const startX = (w - cardW) / 2;
     let nextY = startY;
 
@@ -317,24 +320,33 @@ export class DifficultySelectScene implements Scene {
   private getDifficultyCardHeights(cardW: number): number[] {
     const ctx = this.canvas.getContext('2d');
     if (!ctx) return DIFFICULTIES.map(() => 104);
-    return DIFFICULTIES.map((diff) => this.measureDifficultyCardHeight(ctx, cardW, diff));
+    return DIFFICULTIES.map((diff, i) => this.measureDifficultyCardHeight(ctx, cardW, diff, i));
   }
 
-  private measureDifficultyCardHeight(ctx: CanvasRenderingContext2D, cardW: number, diff: DifficultyOption): number {
-    const padX = 14;
+  private get compact(): boolean { return this.canvas.clientHeight < 700; }
+
+  private measureDifficultyCardHeight(ctx: CanvasRenderingContext2D, cardW: number, diff: DifficultyOption, index: number): number {
+    const compact = this.compact;
+    const padX = compact ? 10 : 14;
     const textWidth = cardW - padX * 2;
-    const labelSize = 18;
+    const labelSize = compact ? 14 : 18;
     const descSize = Math.max(9, labelSize * 0.65);
-    const bulletSize = 11;
+    const bulletSize = compact ? 10 : 11;
+    const showDetails = !compact || index === this.selectedIndex;
 
     ctx.font = `${descSize}px monospace`;
     const descLines = wrapLines(ctx, diff.desc, textWidth);
 
-    ctx.font = `${bulletSize}px monospace`;
-    const bulletLineCount = diff.details.reduce((sum, detail) => sum + wrapLines(ctx, detail, textWidth - 8).length, 0);
+    let height = (compact ? 8 : 14) + labelSize + 6 + descLines.length * (descSize + 3);
 
-    const height = 14 + labelSize + 8 + descLines.length * (descSize + 3) + 6 + bulletLineCount * (bulletSize + 3) + 12;
-    return Math.max(96, Math.ceil(height));
+    if (showDetails) {
+      ctx.font = `${bulletSize}px monospace`;
+      const bulletLineCount = diff.details.reduce((sum, detail) => sum + wrapLines(ctx, detail, textWidth - 8).length, 0);
+      height += 6 + bulletLineCount * (bulletSize + 3);
+    }
+
+    height += compact ? 6 : 12;
+    return Math.max(compact ? 44 : 96, Math.ceil(height));
   }
 
   private getCardIndexAt(cx: number, cy: number): number {
@@ -360,11 +372,14 @@ export class DifficultySelectScene implements Scene {
   private getButtonRow(): { backX: number; startX: number; btnW: number; btnH: number; btnY: number } {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
+    const compact = this.compact;
     const btnGap = 10;
     const totalBtnW = Math.min(w * 0.9, 440);
     const btnW = (totalBtnW - btnGap) / 2;
     const rowX = (w - totalBtnW) / 2;
-    return { backX: rowX, startX: rowX + btnW + btnGap, btnW, btnH: 56, btnY: h - 72 };
+    const btnH = compact ? 42 : 56;
+    const btnY = h - (compact ? 52 : 72);
+    return { backX: rowX, startX: rowX + btnW + btnGap, btnW, btnH, btnY };
   }
 
   private isStartButtonAt(cx: number, cy: number): boolean {
@@ -429,10 +444,11 @@ export class DifficultySelectScene implements Scene {
         ctx.strokeRect(card.x + 1, card.y + 1, card.w - 2, card.h - 2);
       }
 
-      const padX = 12;
+      const compact = this.compact;
+      const padX = compact ? 8 : 12;
       const leftX = card.x + padX;
-      const topY = card.y + 8;
-      const labelSize = Math.max(11, Math.min(card.h * 0.22, 16));
+      const topY = card.y + (compact ? 4 : 8);
+      const labelSize = compact ? Math.max(10, Math.min(card.h * 0.3, 13)) : Math.max(11, Math.min(card.h * 0.22, 16));
       ctx.font = `bold ${labelSize}px monospace`;
       ctx.textAlign = 'left';
       shadowText(ctx, `${option.label} (${option.map.playersPerTeam}v${option.map.playersPerTeam})`, leftX, topY + labelSize, option.color, 'rgba(0,0,0,0.7)');
@@ -440,13 +456,15 @@ export class DifficultySelectScene implements Scene {
       const descSize = Math.max(8, labelSize * 0.7);
       ctx.font = `${descSize}px monospace`;
       ctx.fillStyle = 'rgba(255,255,255,0.72)';
-      ctx.fillText(option.desc, leftX, topY + labelSize + descSize + 4);
+      ctx.fillText(option.desc, leftX, topY + labelSize + descSize + (compact ? 2 : 4));
 
-      const detailSize = Math.max(8, Math.min(card.h * 0.14, 10));
-      ctx.font = `${detailSize}px monospace`;
-      for (let di = 0; di < option.details.length; di++) {
-        const y = topY + labelSize + descSize + 10 + (di + 1) * (detailSize + 2);
-        shadowText(ctx, `  ${option.details[di]}`, leftX, y, isSelected ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.58)', 'rgba(0,0,0,0.4)');
+      if (!compact) {
+        const detailSize = Math.max(8, Math.min(card.h * 0.14, 10));
+        ctx.font = `${detailSize}px monospace`;
+        for (let di = 0; di < option.details.length; di++) {
+          const y = topY + labelSize + descSize + 10 + (di + 1) * (detailSize + 2);
+          shadowText(ctx, `  ${option.details[di]}`, leftX, y, isSelected ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.58)', 'rgba(0,0,0,0.4)');
+        }
       }
     }
 
@@ -475,10 +493,11 @@ export class DifficultySelectScene implements Scene {
         ctx.strokeRect(card.x + 1, card.y + 1, card.w - 2, card.h - 2);
       }
 
-      const padX = 14;
+      const compact = this.compact;
+      const padX = compact ? 10 : 14;
       const leftX = card.x + padX;
-      const contentTop = card.y + 10;
-      const labelSize = 18;
+      const contentTop = card.y + (compact ? 4 : 10);
+      const labelSize = compact ? 14 : 18;
       const textWidth = card.w - padX * 2;
       ctx.font = `bold ${labelSize}px monospace`;
       ctx.textAlign = 'left';
@@ -493,15 +512,18 @@ export class DifficultySelectScene implements Scene {
         lineY += descSize + 3;
       }
 
-      const bulletSize = 11;
-      ctx.font = `${bulletSize}px monospace`;
-      lineY += 3;
-      for (const detail of diff.details) {
-        const wrapped = wrapLines(ctx, detail, textWidth - 8);
-        for (let li = 0; li < wrapped.length; li++) {
-          const prefix = li === 0 ? '• ' : '  ';
-          shadowText(ctx, `${prefix}${wrapped[li]}`, leftX, lineY + bulletSize, isSelected ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.58)', 'rgba(0,0,0,0.4)');
-          lineY += bulletSize + 3;
+      const showDetails = !compact || isSelected;
+      if (showDetails) {
+        const bulletSize = compact ? 10 : 11;
+        ctx.font = `${bulletSize}px monospace`;
+        lineY += 3;
+        for (const detail of diff.details) {
+          const wrapped = wrapLines(ctx, detail, textWidth - 8);
+          for (let li = 0; li < wrapped.length; li++) {
+            const prefix = li === 0 ? '• ' : '  ';
+            shadowText(ctx, `${prefix}${wrapped[li]}`, leftX, lineY + bulletSize, isSelected ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.58)', 'rgba(0,0,0,0.4)');
+            lineY += bulletSize + 3;
+          }
         }
       }
 
@@ -515,20 +537,13 @@ export class DifficultySelectScene implements Scene {
     }
 
     // Bottom button row: BACK (left) + START (right) — matches race select sizing
-    const btnGap = 10;
-    const totalBtnW = Math.min(w * 0.9, 440);
-    const btnW = (totalBtnW - btnGap) / 2;
-    const btnH = 56;
-    const btnY = h - 72;
-    const rowX = (w - totalBtnW) / 2;
+    const { backX, startX, btnW, btnH, btnY } = this.getButtonRow();
     const selColor = DIFFICULTIES[this.selectedIndex].color;
-
-    // BACK sword (dark variant 4)
-    const backX = rowX;
+    const btnFontSize = this.compact ? 13 : 16;
     const rb = UIAssets.swordReveal(this.sceneAge, 0);
     const obx = this.ui.drawSword(ctx, backX, btnY, btnW, btnH, 4, rb);
     if (rb > 0) {
-      ctx.font = 'bold 16px monospace';
+      ctx.font = `bold ${btnFontSize}px monospace`;
       ctx.textAlign = 'center';
       ctx.globalAlpha = rb;
       const backTextX = backX + btnW * 0.52 + obx;
@@ -540,11 +555,10 @@ export class DifficultySelectScene implements Scene {
     }
 
     // START sword (blue variant 0)
-    const startX = rowX + btnW + btnGap;
     const rs = UIAssets.swordReveal(this.sceneAge, 1);
     const osx = this.ui.drawSword(ctx, startX, btnY, btnW, btnH, 0, rs);
     if (rs > 0) {
-      ctx.font = 'bold 16px monospace';
+      ctx.font = `bold ${btnFontSize}px monospace`;
       ctx.globalAlpha = rs;
       const startTextX = startX + btnW * 0.52 + osx;
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -554,8 +568,9 @@ export class DifficultySelectScene implements Scene {
       ctx.globalAlpha = 1;
     }
 
+    const hintY = this.compact ? btnY + btnH + 8 : btnY + btnH + 14;
     ctx.font = `bold ${Math.max(9, hintSize)}px monospace`;
     ctx.fillStyle = selColor;
-    ctx.fillText(`${DIFFICULTIES[this.selectedIndex].label}  •  ${MAP_OPTIONS[this.mapIndex].label}`, w / 2, btnY + btnH + 14);
+    ctx.fillText(`${DIFFICULTIES[this.selectedIndex].label}  •  ${MAP_OPTIONS[this.mapIndex].label}`, w / 2, hintY);
   }
 }

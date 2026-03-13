@@ -234,7 +234,8 @@ export class RaceSelectScene implements Scene {
     const h = this.canvas.clientHeight;
     const headerH = 70;
     const footerH = 80;
-    const availH = h - headerH - footerH;
+    const randomBtnReserve = 40; // space for the random button below the grid
+    const availH = h - headerH - footerH - randomBtnReserve;
     const availW = w - 40;
     const gapX = 8;
     const gapY = 8;

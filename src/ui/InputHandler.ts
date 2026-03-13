@@ -631,6 +631,7 @@ export class InputHandler {
     const bodySize = compact ? 12 : 14;
     const closeSize = compact ? 28 : 32;
 
+    const maxTextW = rp - lp;
     const heading = (label: string, color = '#2979ff') => {
       ctx.fillStyle = color;
       ctx.font = `bold ${headingSize}px monospace`;
@@ -640,8 +641,25 @@ export class InputHandler {
     const line = (body: string, color = '#aaa') => {
       ctx.fillStyle = color;
       ctx.font = `${bodySize}px monospace`;
-      ctx.fillText(body, lp, y);
-      y += lh;
+      // Word-wrap if text exceeds available width
+      if (ctx.measureText(body).width <= maxTextW) {
+        ctx.fillText(body, lp, y);
+        y += lh;
+      } else {
+        const words = body.split(' ');
+        let cur = '';
+        for (const word of words) {
+          const test = cur ? cur + ' ' + word : word;
+          if (ctx.measureText(test).width > maxTextW && cur) {
+            ctx.fillText(cur, lp, y);
+            y += lh;
+            cur = word;
+          } else {
+            cur = test;
+          }
+        }
+        if (cur) { ctx.fillText(cur, lp, y); y += lh; }
+      }
     };
     const rule = () => {
       ctx.strokeStyle = '#222';
@@ -686,10 +704,10 @@ export class InputHandler {
     rule();
 
     heading('HOTKEYS', '#ff9800');
-    line('[P/MMB] ping   [Q hold] chat wheel   [Z/X/C/V] quick chat');
-    line('[WASD/drag] pan   [Scroll] zoom   [Esc] cancel modes');
-    line('Mobile: hold map for chat wheel, use PING/SETTINGS/CHAT above tray');
-    line('Use ? (top-right) anytime to reopen this help.', '#9bb7ff');
+    line('[P/MMB] ping  [Q] chat wheel  [Z/X/C/V] quick chat');
+    line('[WASD/drag] pan  [Scroll] zoom  [Esc] cancel');
+    line('Mobile: hold map for chat wheel.');
+    line('Use ? (top-right) to reopen this help.', '#9bb7ff');
 
     const btnX = px + pw - closeSize - inset;
     const btnY = py + inset;
