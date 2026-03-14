@@ -147,7 +147,7 @@ export class PostMatchScene implements Scene {
 
     // Stats table panel - Banner 9-slice with generous padding
     const panelW = Math.min(w * 0.94, 1060);
-    const panelH = h * 0.82;
+    const panelH = h * 0.90;
     const panelX = (w - panelW) / 2;
     const panelY = headerBannerY + headerBannerH + 38;
     const bgPadX = Math.round(panelW * 0.05);
@@ -177,7 +177,7 @@ export class PostMatchScene implements Scene {
 
     // Header row with icons
     ctx.font = `bold ${tableFontSize * 0.85}px monospace`;
-    ctx.fillStyle = '#3e2c1a';
+    ctx.fillStyle = '#5c4020';
     ctx.textAlign = 'left';
     ctx.fillText('PLAYER', colX[0], tableY);
     ctx.textAlign = 'right';
@@ -186,7 +186,7 @@ export class PostMatchScene implements Scene {
     this.ui.drawIcon(ctx, 'wood', colX[2] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
     this.ui.drawIcon(ctx, 'meat', colX[3] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
     this.ui.drawIcon(ctx, 'sword', colX[4] - hdrIconSz, tableY - hdrIconSz + 2, hdrIconSz);
-    ctx.fillStyle = '#3e2c1a';
+    ctx.fillStyle = '#5c4020';
     ctx.fillText('KILLED', colX[5], tableY);
     ctx.fillText('DMG', colX[6], tableY);
 
@@ -251,7 +251,7 @@ export class PostMatchScene implements Scene {
       ctx.fillText(truncated, textX, y);
 
       ctx.font = `${tableFontSize}px monospace`;
-      ctx.fillStyle = '#2a1e10';
+      ctx.fillStyle = '#4a3518';
       ctx.textAlign = 'right';
       ctx.fillText(`${ps?.totalGoldEarned ?? 0}`, colX[1], y);
       ctx.fillText(`${ps?.totalWoodEarned ?? 0}`, colX[2], y);
@@ -266,7 +266,7 @@ export class PostMatchScene implements Scene {
     const hqY = tableY + (rowIdx + 1.5) * rowH;
     ctx.font = `bold ${fontSize}px monospace`;
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#3e2c1a';
+    ctx.fillStyle = '#5c4020';
     ctx.fillText('HQ Health', w / 2, hqY);
 
     const barW = Math.min(140, panelW * 0.18);
@@ -312,6 +312,7 @@ export class PostMatchScene implements Scene {
     const awards = this.computeAwards(pStats);
     const awardIcons: Record<string, IconName> = {
       'MVP Damage': 'sword', 'Best Economy': 'gold', 'Best Defender': 'shield',
+      'Most Spawned': 'sword', 'Nuke Master': 'sword', 'Diamond Runner': 'gold',
     };
     const gap = Math.round(fontSize * 0.4); // consistent spacing unit
 
@@ -345,19 +346,19 @@ export class PostMatchScene implements Scene {
         // Award label — truncate to fit card
         ctx.font = `bold ${fontSize * 0.55}px monospace`;
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#5a3e1e';
+        ctx.fillStyle = '#6b4e28';
         const label = this.truncateText(ctx, a.label.toUpperCase(), cardW - inset * 2);
         ctx.fillText(label, cardCenterX, y + inset + iconSz + fontSize * 0.55);
 
         // Player name in their color
         ctx.font = `bold ${fontSize * 0.65}px monospace`;
-        ctx.fillStyle = this.darkenColor(PLAYER_COLORS[a.playerId], 0.6);
+        ctx.fillStyle = this.darkenColor(PLAYER_COLORS[a.playerId], 0.7);
         const name = this.truncateText(ctx, this.slotLabel(a.playerId), cardW - inset * 2);
         ctx.fillText(name, cardCenterX, y + inset + iconSz + fontSize * 1.3);
 
         // Value
         ctx.font = `${fontSize * 0.5}px monospace`;
-        ctx.fillStyle = '#6b5030';
+        ctx.fillStyle = '#7a5c38';
         ctx.fillText(a.value, cardCenterX, y + inset + iconSz + fontSize * 1.9);
 
         cx += cardW + cardGap;
@@ -395,7 +396,7 @@ export class PostMatchScene implements Scene {
     );
     if (spriteResult) {
       const [img, def] = spriteResult;
-      const tick = Math.floor(this.animTime * 8); // slow idle animation ~8fps
+      const tick = Math.floor(this.animTime * 4); // slow idle animation ~4fps
       const frame = getSpriteFrame(tick, def);
       const sx = frame * def.frameW;
       const scale = def.scale ?? 1.0;
@@ -427,7 +428,7 @@ export class PostMatchScene implements Scene {
     const headerStartX = textCenterX - headerTotalW / 2;
     this.ui.drawIcon(ctx, 'shield', headerStartX, line1Y - shieldSz * 0.7, shieldSz);
     ctx.textAlign = 'left';
-    ctx.fillStyle = '#3e2c1a';
+    ctx.fillStyle = '#5c4020';
     ctx.fillText('WAR HERO', headerStartX + shieldSz + gap * 0.5, line1Y);
 
     // Line 2: Unit name in race color
@@ -452,7 +453,7 @@ export class PostMatchScene implements Scene {
     const killStartX = textCenterX - killTotalW / 2;
     this.ui.drawIcon(ctx, 'sword', killStartX, line4Y - killIconSz * 0.7, killIconSz);
     ctx.textAlign = 'left';
-    ctx.fillStyle = '#3e2c1a';
+    ctx.fillStyle = '#5c4020';
     ctx.fillText(killText, killStartX + killIconSz + gap * 0.4, line4Y);
 
     // Line 5: Survival / death status
@@ -520,6 +521,9 @@ export class PostMatchScene implements Scene {
     best(ps => ps.totalDamageDealt, 'MVP Damage', v => `${v} dmg`);
     best(ps => ps.totalGoldEarned + ps.totalWoodEarned + ps.totalStoneEarned, 'Best Economy', v => `${v} resources`);
     best(ps => ps.totalDamageNearHQ, 'Best Defender', v => `${v} dmg near HQ`);
+    best(ps => ps.unitsSpawned, 'Most Spawned', v => `${v} units`);
+    best(ps => ps.nukeKills, 'Nuke Master', v => `${v} kills`);
+    best(ps => ps.diamondPickups, 'Diamond Runner', v => `${v} pickups`);
 
     return awards;
   }

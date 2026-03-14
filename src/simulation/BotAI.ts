@@ -2427,7 +2427,7 @@ function botEvaluateLanes(
     if (currentLane !== weakerLane) {
       targetLane = weakerLane;
       // Coordinate with team via chat
-      if (state.tick - (ctx.lastChatTick[playerId] ?? 0) > 200) {
+      if (state.tick - (ctx.lastChatTick[playerId] ?? 0) > 10 * TICK_RATE) {
         const msg = weakerLane === Lane.Left ? 'Attack Left' : 'Attack Right';
         emit({ type: 'quick_chat', playerId, message: msg });
         ctx.lastChatTick[playerId] = state.tick;
@@ -2444,7 +2444,7 @@ function botEvaluateLanes(
 
     if (overallRatio > effectivePushThreshold) {
       const lastPush = ctx.lastPushTick[playerId] ?? 0;
-      const pushCooldown = 200; // 10 seconds cooldown
+      const pushCooldown = 10 * TICK_RATE; // 10 seconds cooldown
 
       if (state.tick - lastPush > pushCooldown) {
         if (enemyLeftStr < enemyRightStr) {

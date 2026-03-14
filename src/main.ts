@@ -88,7 +88,7 @@ uiReady.then(() => {
     manager.switchTo('difficultySelect');
   });
 
-  const difficultySelectScene = new DifficultySelectScene(manager, canvas, sharedUI, (difficulty, mapDef, teamSize) => {
+  const difficultySelectScene = new DifficultySelectScene(manager, canvas, sharedUI, (difficulty, mapDef, teamSize, fogOfWar) => {
     // Build solo config using party path for proper teamSize support
     const ppt = mapDef.playersPerTeam;
     const bots: { [slot: string]: string } = {};
@@ -109,6 +109,7 @@ uiReady.then(() => {
       botDifficulty: difficulty,
       mapDef,
       slotNames: { '0': titleScene.name },
+      fogOfWar,
     });
     manager.switchTo('match');
   });

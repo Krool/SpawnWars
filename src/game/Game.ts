@@ -22,6 +22,7 @@ export interface GamePartyOptions {
   partyCode?: string;        // set for networked multiplayer (enables CommandSync)
   botDifficulty?: BotDifficultyLevel;
   mapDef?: MapDef;           // map to play on (default: DUEL_MAP)
+  fogOfWar?: boolean;        // enable fog of war
 }
 
 export class Game {
@@ -63,8 +64,9 @@ export class Game {
   /** Current round-trip latency in ms (0 for solo). */
   get networkLatencyMs(): number { return this.commandSync?.latencyMs ?? 0; }
 
-  constructor(canvas: HTMLCanvasElement, playerRace: Race = Race.Crown, ui?: UIAssets, partyOpts?: GamePartyOptions, soloDifficulty?: BotDifficultyLevel, soloMapDef?: MapDef) {
+  constructor(canvas: HTMLCanvasElement, playerRace: Race = Race.Crown, ui?: UIAssets, partyOpts?: GamePartyOptions, soloDifficulty?: BotDifficultyLevel, soloMapDef?: MapDef, soloFogOfWar = false) {
     const mapDef = partyOpts?.mapDef ?? soloMapDef ?? DUEL_MAP;
+    const fogOfWar = partyOpts?.fogOfWar ?? soloFogOfWar;
     // Pick bot races: fill remaining slots from races other than player's
     const allRaces = [Race.Crown, Race.Horde, Race.Goblins, Race.Oozlings, Race.Demon, Race.Deep, Race.Wild, Race.Geists, Race.Tenders];
 
@@ -109,7 +111,7 @@ export class Game {
           players.push({ race: otherRaces[botIdx++ % otherRaces.length], isBot: false, isEmpty: true });
         }
       }
-      this.state = createInitialState(players, partyOpts.seed, mapDef);
+      this.state = createInitialState(players, partyOpts.seed, mapDef, fogOfWar);
     } else {
       // Solo mode: P0 human, rest are bots
       const otherRaces = allRaces.filter(r => r !== playerRace);
@@ -124,7 +126,7 @@ export class Game {
       for (let i = 1; i < mapDef.maxPlayers; i++) {
         players.push({ race: otherRaces[i - 1], isBot: true, isEmpty: false });
       }
-      this.state = createInitialState(players, undefined, mapDef);
+      this.state = createInitialState(players, undefined, mapDef, fogOfWar);
     }
 
     // Set up bot difficulty (global default + per-slot overrides)
@@ -459,6 +461,7 @@ export class Game {
 
   private render(): void {
     this.renderer.camera.tick();
+    this.renderer.placingBuilding = this.input.placingBuilding;
     this.renderer.render(this.state, this.isMultiplayer ? this.networkLatencyMs : undefined, this.desyncDetected, this.peerDisconnected, this.waitingForAllyMs);
     this.input.render(this.renderer);
   }

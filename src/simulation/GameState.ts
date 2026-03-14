@@ -223,8 +223,9 @@ function hasPathToEdge(cellMap: Map<string, GoldCell>, sx: number, sy: number, s
 
 // === Visual effect helpers ===
 
-function addFloatingText(state: GameState, x: number, y: number, text: string, color: string, icon?: string): void {
-  state.floatingTexts.push({ x, y, text, color, icon, age: 0, maxAge: TICK_RATE * 1.5 });
+function addFloatingText(state: GameState, x: number, y: number, text: string, color: string, icon?: string, big?: boolean): void {
+  const xOff = (state.rng() - 0.5) * 1.2; // random spread ±0.6 tiles
+  state.floatingTexts.push({ x, y, text, color, icon, age: 0, maxAge: TICK_RATE * 1.5, xOff, big });
 }
 
 function addDeathParticles(state: GameState, x: number, y: number, color: string, count: number): void {
@@ -253,6 +254,7 @@ export function createInitialState(
   players: { race: Race; isBot: boolean; isEmpty?: boolean }[],
   seed?: number,
   mapDef?: MapDef,
+  fogOfWar = false,
 ): GameState {
   const map = mapDef ?? DUEL_MAP;
   const rngSeed = seed ?? (Date.now() ^ (Math.random() * 0xffffffff));
@@ -315,6 +317,8 @@ export function createInitialState(
     playerStats: players.map(() => createPlayerStats()),
     warHeroes: [],
     fallenHeroes: [],
+    fogOfWar,
+    visibility: map.teams.map(() => new Array(map.width * map.height).fill(false)),
   };
 
   // Give each player a free starter hut + harvester (skip empty slots)
@@ -347,6 +351,9 @@ export function createInitialState(
     });
   }
 
+
+  // Compute initial visibility so first frame isn't all dark
+  if (fogOfWar) updateVisibility(state);
 
   return state;
 }
@@ -634,7 +641,73 @@ export function simulateTick(state: GameState, commands: GameCommand[]): void {
     state.winCondition = 'timeout';
   }
 
+  // Update fog of war visibility every tick for immediate response
+  if (state.fogOfWar) {
+    updateVisibility(state);
+  }
+
   state.tick++;
+}
+
+// === Fog of War Visibility ===
+
+const UNIT_VISION = 10;      // tiles
+const BUILDING_VISION = 8;
+const TOWER_VISION = 12;
+const HQ_VISION = 14;
+const HARVESTER_VISION = 6;
+
+function revealCircle(vis: boolean[], cx: number, cy: number, radius: number, mapW: number, mapH: number): void {
+  const r2 = radius * radius;
+  const x0 = Math.max(0, Math.floor(cx - radius));
+  const x1 = Math.min(mapW - 1, Math.ceil(cx + radius));
+  const y0 = Math.max(0, Math.floor(cy - radius));
+  const y1 = Math.min(mapH - 1, Math.ceil(cy + radius));
+  for (let y = y0; y <= y1; y++) {
+    const dy = y - cy;
+    const dy2 = dy * dy;
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - cx;
+      if (dx * dx + dy2 <= r2) {
+        vis[y * mapW + x] = true;
+      }
+    }
+  }
+}
+
+export function updateVisibility(state: GameState): void {
+  const mapW = state.mapDef.width;
+  const mapH = state.mapDef.height;
+  const teamCount = state.mapDef.teams.length;
+
+  for (let t = 0; t < teamCount; t++) {
+    const vis = state.visibility[t];
+    vis.fill(false);
+
+    // HQ vision
+    const hqPos = getHQPosition(t as Team, state.mapDef);
+    revealCircle(vis, hqPos.x + HQ_WIDTH / 2, hqPos.y + HQ_HEIGHT / 2, HQ_VISION, mapW, mapH);
+
+    // Buildings
+    for (const b of state.buildings) {
+      if (state.players[b.playerId]?.team !== t) continue;
+      const r = b.type === BuildingType.Tower ? TOWER_VISION : BUILDING_VISION;
+      revealCircle(vis, b.worldX, b.worldY, r, mapW, mapH);
+    }
+
+    // Units
+    for (const u of state.units) {
+      if (u.hp <= 0 || u.team !== t) continue;
+      revealCircle(vis, u.x, u.y, UNIT_VISION, mapW, mapH);
+    }
+
+    // Harvesters
+    for (const h of state.harvesters) {
+      if (h.state === 'dead') continue;
+      if (state.players[h.playerId]?.team !== t) continue;
+      revealCircle(vis, h.x, h.y, HARVESTER_VISION, mapW, mapH);
+    }
+  }
 }
 
 // === Commands ===
@@ -879,7 +952,7 @@ function setHutAssignment(state: GameState, cmd: Extract<GameCommand, { type: 's
   }
 }
 
-const NUKE_TEAM_COOLDOWN_TICKS = 10 * TICK_RATE; // 10s team-wide cooldown between nukes
+const NUKE_TEAM_COOLDOWN_TICKS = 11 * TICK_RATE; // 11s team-wide cooldown between nukes (10% slower)
 
 function fireNuke(state: GameState, cmd: Extract<GameCommand, { type: 'fire_nuke' }>): void {
   const player = state.players[cmd.playerId];
@@ -1315,7 +1388,7 @@ function dealDamage(state: GameState, target: UnitState, amount: number, showFlo
   // Dodge check
   const dodge = target.upgradeSpecial?.dodgeChance ?? 0;
   if (dodge > 0 && state.rng() < dodge) {
-    if (state.rng() < 0.3) addFloatingText(state, target.x, target.y, 'DODGE', '#ffffff');
+    if (state.rng() < 0.3) addFloatingText(state, target.x, target.y, '💨', '#ffffff', undefined, true);
     addCombatEvent(state, { type: 'dodge', x: target.x, y: target.y, color: '#ffffff' });
     return;
   }
@@ -1381,7 +1454,7 @@ function dealDamage(state: GameState, target: UnitState, amount: number, showFlo
               }
             }
             if (state.rng() < 0.25) {
-              addFloatingText(state, killer.x, killer.y - 0.3, 'FRENZY!', '#ff4400');
+              addFloatingText(state, killer.x, killer.y - 0.3, '⚡', '#ff4400', undefined, true);
             }
           }
         }
@@ -1459,7 +1532,7 @@ function applyCasterSupport(state: GameState, caster: UnitState, race: Race, sp:
         applyStatus(e, StatusType.Slow, 1 + (sp?.extraSlowStacks ?? 0));
       }
       if (enemies.length > 0) {
-        addFloatingText(state, caster.x, caster.y - 0.5, 'HEX', '#2e7d32');
+        addFloatingText(state, caster.x, caster.y - 0.5, '🔮', '#2e7d32', undefined, true);
         addCombatEvent(state, { type: 'pulse', x: caster.x, y: caster.y, radius: supportRange, color: '#2e7d32' });
       }
       break;
@@ -1483,7 +1556,7 @@ function applyCasterSupport(state: GameState, caster: UnitState, race: Race, sp:
         }
       }
       if (cleansed > 0) {
-        addFloatingText(state, caster.x, caster.y - 0.5, 'CLEANSE', '#1565c0');
+        addFloatingText(state, caster.x, caster.y - 0.5, '✨', '#1565c0', undefined, true);
       }
       break;
     }
@@ -1556,7 +1629,7 @@ function applyOnHitEffects(state: GameState, attacker: UnitState, target: UnitSt
           applyKnockback(target, 0.02, state.mapDef);
           addDeathParticles(state, target.x, target.y, '#ffab40', 3);
           addCombatEvent(state, { type: 'knockback', x: target.x, y: target.y, color: '#ffab40' });
-          if (state.rng() < 0.3) addFloatingText(state, target.x, target.y - 0.3, 'PUSH', '#ffab40');
+          if (state.rng() < 0.3) addFloatingText(state, target.x, target.y - 0.3, '💥', '#ffab40', undefined, true);
         }
         const hordeSteal = Math.round(attacker.damage * 0.10);
         if (hordeSteal > 0) {
@@ -2113,7 +2186,7 @@ function tickCombat(state: GameState): void {
               addCombatEvent(state, { type: 'chain', x: unit.x, y: unit.y, x2: cleaved[ci].x, y2: cleaved[ci].y, color: '#ff9800' });
             }
             if (cleaved.length > 0 && state.rng() < 0.3) {
-              addFloatingText(state, unit.x, unit.y - 0.3, 'CLEAVE', '#ff9800');
+              addFloatingText(state, unit.x, unit.y - 0.3, '⚔️', '#ff9800', undefined, true);
             }
           }
         }
@@ -2175,7 +2248,7 @@ function tickCombat(state: GameState): void {
       // Revive once: restore HP and clear the special so it doesn't trigger again
       u.hp = Math.max(1, Math.round(u.maxHp * revivePct));
       u.upgradeSpecial = { ...u.upgradeSpecial, reviveHpPct: 0 };
-      addFloatingText(state, u.x, u.y, 'REVIVE', '#44ff44');
+      addFloatingText(state, u.x, u.y, '💚', '#44ff44', undefined, true);
       addDeathParticles(state, u.x, u.y, '#44ff44', 3);
       addCombatEvent(state, { type: 'revive', x: u.x, y: u.y, color: '#44ff44' });
       continue;
@@ -2215,7 +2288,7 @@ function tickCombat(state: GameState): void {
 function tickHQDefense(state: GameState): void {
   const HQ_RANGE = 11;
   const HQ_DAMAGE = 18;
-  const HQ_COOLDOWN_TICKS = Math.round(1.2 * TICK_RATE);
+  const HQ_COOLDOWN_TICKS = Math.round(1.32 * TICK_RATE); // 10% slower
 
   for (const team of [Team.Bottom, Team.Top]) {
     state.hqAttackTimer[team]--;
@@ -2533,14 +2606,14 @@ function tickStatusEffects(state: GameState): void {
           addDeathParticles(state, unit.x, unit.y, '#ff6600', 1);
           addDeathParticles(state, unit.x, unit.y, '#2979ff', 1);
           if (state.tick % (TICK_RATE * 3) === 0) { // show "SEARED" every 3 seconds
-            addFloatingText(state, unit.x, unit.y - 0.3, 'SEARED', '#ff8c00');
+            addFloatingText(state, unit.x, unit.y - 0.3, '🔥', '#ff8c00', undefined, true);
           }
         } else {
           addDeathParticles(state, unit.x, unit.y, '#ff4400', 1);
         }
         // BLIGHT: burn 3+ stacks = no regen (shown every 3s)
         if (eff.stacks >= 3 && state.tick % (TICK_RATE * 3) === 0) {
-          addFloatingText(state, unit.x, unit.y - 0.5, 'BLIGHT', '#9c27b0');
+          addFloatingText(state, unit.x, unit.y - 0.5, '☠️', '#9c27b0', undefined, true);
         }
       }
 
@@ -2635,7 +2708,7 @@ function applyTowerSpecial(state: GameState, building: BuildingState, race: Race
         if (state.rng() < 0.3) {
           applyKnockback(nearest, 0.02, state.mapDef);
           addDeathParticles(state, nearest.x, nearest.y, '#ffab40', 3);
-          if (state.rng() < 0.3) addFloatingText(state, nearest.x, nearest.y - 0.3, 'PUSH', '#ffab40');
+          if (state.rng() < 0.3) addFloatingText(state, nearest.x, nearest.y - 0.3, '💥', '#ffab40', undefined, true);
         }
         addDeathParticles(state, nearest.x, nearest.y, '#c62828', 2);
         building.actionTimer = Math.round(stats.attackSpeed * TICK_RATE);

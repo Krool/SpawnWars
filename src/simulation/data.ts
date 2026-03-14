@@ -143,7 +143,7 @@ export const WOOD_YIELD_PER_TRIP = 10;
 export const STONE_YIELD_PER_TRIP = 10;
 
 // Spawn interval in ticks
-export const SPAWN_INTERVAL_TICKS = 10 * TICK_RATE; // 10 seconds
+export const SPAWN_INTERVAL_TICKS = 14 * TICK_RATE; // 14 seconds (40% slower spawns)
 
 // Unit stats per race per building type
 interface UnitStatDef {
@@ -163,124 +163,124 @@ export const UNIT_STATS: Record<Race, RaceUnits> = {
   // === CROWN (Humans) — Balanced Allrounders ===
   [Race.Crown]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Swordsman', hp: 85, damage: 11, attackSpeed: 1.0, moveSpeed: 3.5, range: 1, ascii: '[+]',
+      name: 'Swordsman', hp: 94, damage: 11, attackSpeed: 1.1, moveSpeed: 3.5, range: 1, ascii: '[+]',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Bowman', hp: 45, damage: 9, attackSpeed: 1.2, moveSpeed: 3.5, range: 7, ascii: '>>',
+      name: 'Bowman', hp: 50, damage: 9, attackSpeed: 1.3, moveSpeed: 3.5, range: 7, ascii: '>>',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Priest', hp: 40, damage: 13, attackSpeed: 2.0, moveSpeed: 3.0, range: 7, ascii: '{C}',
+      name: 'Priest', hp: 44, damage: 13, attackSpeed: 2.2, moveSpeed: 3.0, range: 7, ascii: '{C}',
     },
   },
   // === HORDE (Orcs) — Brute Force ===
   [Race.Horde]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Brute', hp: 100, damage: 14, attackSpeed: 1.0, moveSpeed: 3.2, range: 1, ascii: '[#]',
+      name: 'Brute', hp: 110, damage: 14, attackSpeed: 1.1, moveSpeed: 3.2, range: 1, ascii: '[#]',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Bowcleaver', hp: 85, damage: 13, attackSpeed: 1.2, moveSpeed: 3.0, range: 7, ascii: '=>',
+      name: 'Bowcleaver', hp: 94, damage: 13, attackSpeed: 1.3, moveSpeed: 3.0, range: 7, ascii: '=>',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'War Chanter', hp: 51, damage: 15, attackSpeed: 1.8, moveSpeed: 3.2, range: 7, ascii: '{H}',
+      name: 'War Chanter', hp: 56, damage: 15, attackSpeed: 2.0, moveSpeed: 3.2, range: 7, ascii: '{H}',
     },
   },
   // === GOBLINS — Speed & Trickery ===
   [Race.Goblins]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Sticker', hp: 55, damage: 7, attackSpeed: 0.8, moveSpeed: 5.0, range: 1, ascii: '/>',
+      name: 'Sticker', hp: 61, damage: 7, attackSpeed: 0.9, moveSpeed: 5.0, range: 1, ascii: '/>',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Knifer', hp: 35, damage: 8, attackSpeed: 0.9, moveSpeed: 4.5, range: 6, ascii: '~>',
+      name: 'Knifer', hp: 39, damage: 8, attackSpeed: 1.0, moveSpeed: 4.5, range: 6, ascii: '~>',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Hexer', hp: 28, damage: 10, attackSpeed: 2.0, moveSpeed: 3.5, range: 7, ascii: '{G}',
+      name: 'Hexer', hp: 31, damage: 10, attackSpeed: 2.2, moveSpeed: 3.5, range: 7, ascii: '{G}',
     },
   },
   // === OOZLINGS (Slimes) — Adaptive Swarm ===
   [Race.Oozlings]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Globule', hp: 52, damage: 5, attackSpeed: 0.8, moveSpeed: 4.2, range: 1, ascii: 'o', spawnCount: 2,
+      name: 'Globule', hp: 57, damage: 5, attackSpeed: 0.9, moveSpeed: 4.2, range: 1, ascii: 'o', spawnCount: 2,
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Spitter', hp: 36, damage: 5, attackSpeed: 1.0, moveSpeed: 3.8, range: 6, ascii: 'O~', spawnCount: 2,
+      name: 'Spitter', hp: 40, damage: 5, attackSpeed: 1.1, moveSpeed: 3.8, range: 6, ascii: 'O~', spawnCount: 2,
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Bloater', hp: 35, damage: 12, attackSpeed: 2.2, moveSpeed: 2.8, range: 6, ascii: '{O}',
+      name: 'Bloater', hp: 39, damage: 12, attackSpeed: 2.4, moveSpeed: 2.8, range: 6, ascii: '{O}',
     },
   },
   // === DEMON — Glass Cannon Chaos ===
   [Race.Demon]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Smasher', hp: 68, damage: 10, attackSpeed: 0.9, moveSpeed: 4.2, range: 1, ascii: '/X\\',
+      name: 'Smasher', hp: 75, damage: 10, attackSpeed: 1.0, moveSpeed: 4.2, range: 1, ascii: '/X\\',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Eye Sniper', hp: 45, damage: 11, attackSpeed: 1.3, moveSpeed: 3.5, range: 8, ascii: '@>',
+      name: 'Eye Sniper', hp: 50, damage: 11, attackSpeed: 1.4, moveSpeed: 3.5, range: 8, ascii: '@>',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Overlord', hp: 36, damage: 15, attackSpeed: 2.0, moveSpeed: 2.5, range: 7, ascii: '{D}',
+      name: 'Overlord', hp: 40, damage: 15, attackSpeed: 2.2, moveSpeed: 2.5, range: 7, ascii: '{D}',
     },
   },
   // === DEEP (Aquatic) — Control & Attrition ===
   [Race.Deep]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Shell Guard', hp: 200, damage: 9, attackSpeed: 1.1, moveSpeed: 2.5, range: 1, ascii: '|W|',
+      name: 'Shell Guard', hp: 220, damage: 9, attackSpeed: 1.2, moveSpeed: 2.5, range: 1, ascii: '|W|',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Harpooner', hp: 66, damage: 13, attackSpeed: 1.2, moveSpeed: 3.2, range: 7, ascii: '->',
+      name: 'Harpooner', hp: 73, damage: 13, attackSpeed: 1.3, moveSpeed: 3.2, range: 7, ascii: '->',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Tidecaller', hp: 54, damage: 17, attackSpeed: 2.2, moveSpeed: 3.0, range: 7, ascii: '{~}',
+      name: 'Tidecaller', hp: 59, damage: 17, attackSpeed: 2.4, moveSpeed: 3.0, range: 7, ascii: '{~}',
     },
   },
   // === WILD (Beasts) — Aggression & Poison ===
   [Race.Wild]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Lurker', hp: 65, damage: 8, attackSpeed: 0.9, moveSpeed: 3.0, range: 1, ascii: '%#',
+      name: 'Lurker', hp: 72, damage: 8, attackSpeed: 1.0, moveSpeed: 3.0, range: 1, ascii: '%#',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Bonechucker', hp: 45, damage: 11, attackSpeed: 1.0, moveSpeed: 3.6, range: 6, ascii: '.@',
+      name: 'Bonechucker', hp: 50, damage: 11, attackSpeed: 1.1, moveSpeed: 3.6, range: 6, ascii: '.@',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Scaled Sage', hp: 38, damage: 13, attackSpeed: 2.0, moveSpeed: 3.5, range: 7, ascii: '{W}',
+      name: 'Scaled Sage', hp: 42, damage: 13, attackSpeed: 2.2, moveSpeed: 3.5, range: 7, ascii: '{W}',
     },
   },
   // === GEISTS (Undead) — Undying Attrition ===
   [Race.Geists]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Bone Knight', hp: 85, damage: 8, attackSpeed: 1.0, moveSpeed: 3.5, range: 1, ascii: '~^',
+      name: 'Bone Knight', hp: 94, damage: 8, attackSpeed: 1.1, moveSpeed: 3.5, range: 1, ascii: '~^',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Wraith Bow', hp: 35, damage: 10, attackSpeed: 1.1, moveSpeed: 3.8, range: 7, ascii: '~>',
+      name: 'Wraith Bow', hp: 39, damage: 10, attackSpeed: 1.2, moveSpeed: 3.8, range: 7, ascii: '~>',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Necromancer', hp: 29, damage: 13, attackSpeed: 2.2, moveSpeed: 3.0, range: 7, ascii: '{V}',
+      name: 'Necromancer', hp: 32, damage: 13, attackSpeed: 2.4, moveSpeed: 3.0, range: 7, ascii: '{V}',
     },
   },
   // === TENDERS (Nature/Fey) — Sustain & Healing ===
   [Race.Tenders]: {
     [BuildingType.MeleeSpawner]: {
-      name: 'Treant', hp: 140, damage: 9, attackSpeed: 1.1, moveSpeed: 2.8, range: 1, ascii: '|T|',
+      name: 'Treant', hp: 154, damage: 9, attackSpeed: 1.2, moveSpeed: 2.8, range: 1, ascii: '|T|',
     },
     [BuildingType.RangedSpawner]: {
-      name: 'Tinker', hp: 40, damage: 10, attackSpeed: 1.0, moveSpeed: 4.0, range: 7, ascii: '.>',
+      name: 'Tinker', hp: 44, damage: 10, attackSpeed: 1.1, moveSpeed: 4.0, range: 7, ascii: '.>',
     },
     [BuildingType.CasterSpawner]: {
-      name: 'Grove Keeper', hp: 45, damage: 13, attackSpeed: 2.0, moveSpeed: 3.0, range: 7, ascii: '{Y}',
+      name: 'Grove Keeper', hp: 50, damage: 13, attackSpeed: 2.2, moveSpeed: 3.0, range: 7, ascii: '{Y}',
     },
   },
 };
 
 // Tower stats per race
 export const TOWER_STATS: Record<Race, { hp: number; damage: number; attackSpeed: number; range: number; ascii: string }> = {
-  [Race.Crown]:    { hp: 880,  damage: 10, attackSpeed: 1.4, range: 11, ascii: '[||]' },
-  [Race.Horde]:    { hp: 1000, damage: 14, attackSpeed: 1.4, range: 11, ascii: '[HH]' },
-  [Race.Goblins]:  { hp: 600,  damage: 10, attackSpeed: 1.0, range: 11, ascii: '[gg]' },
-  [Race.Oozlings]: { hp: 680,  damage: 8,  attackSpeed: 0.8, range: 11, ascii: '[oo]' },
-  [Race.Demon]:    { hp: 640,  damage: 18, attackSpeed: 1.8, range: 12, ascii: '<F>' },
-  [Race.Deep]:     { hp: 1120, damage: 8,  attackSpeed: 1.0, range: 11, ascii: '(@)' },
-  [Race.Wild]:     { hp: 800,  damage: 10, attackSpeed: 1.0, range: 9,  ascii: '[*]' },
-  [Race.Geists]:   { hp: 720,  damage: 12, attackSpeed: 1.2, range: 12, ascii: '{~}' },
-  [Race.Tenders]:  { hp: 1040, damage: 8,  attackSpeed: 1.0, range: 8,  ascii: '[^^]' },
+  [Race.Crown]:    { hp: 968,  damage: 10, attackSpeed: 1.5, range: 11, ascii: '[||]' },
+  [Race.Horde]:    { hp: 1100, damage: 14, attackSpeed: 1.5, range: 11, ascii: '[HH]' },
+  [Race.Goblins]:  { hp: 660,  damage: 10, attackSpeed: 1.1, range: 11, ascii: '[gg]' },
+  [Race.Oozlings]: { hp: 748,  damage: 8,  attackSpeed: 0.9, range: 11, ascii: '[oo]' },
+  [Race.Demon]:    { hp: 704,  damage: 18, attackSpeed: 2.0, range: 12, ascii: '<F>' },
+  [Race.Deep]:     { hp: 1232, damage: 8,  attackSpeed: 1.1, range: 11, ascii: '(@)' },
+  [Race.Wild]:     { hp: 880,  damage: 10, attackSpeed: 1.1, range: 9,  ascii: '[*]' },
+  [Race.Geists]:   { hp: 792,  damage: 12, attackSpeed: 1.3, range: 12, ascii: '{~}' },
+  [Race.Tenders]:  { hp: 1144, damage: 8,  attackSpeed: 1.1, range: 8,  ascii: '[^^]' },
 };
 
 // Race accent colors
@@ -316,7 +316,7 @@ export const HARVESTER_RESPAWN_TICKS = 10 * TICK_RATE;
 export const HARVESTER_MIN_SEPARATION = 0.8;     // minimum tile distance between harvesters
 
 // Tower constants
-export const BASTION_TOWER_SHIELD_INTERVAL_TICKS = 8 * TICK_RATE;
+export const BASTION_TOWER_SHIELD_INTERVAL_TICKS = Math.round(8.8 * TICK_RATE); // 10% slower
 
 // === Upgrade Tree Definitions ===
 

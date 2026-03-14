@@ -436,6 +436,8 @@ export interface FloatingText {
   icon?: string;   // optional resource icon name ('gold', 'wood', 'meat')
   age: number;     // ticks alive
   maxAge: number;  // ticks until removed
+  xOff: number;    // random x offset in tiles for visual spread
+  big?: boolean;   // true = keyword/icon text (larger font, pop-in scale)
 }
 
 export interface Particle {
@@ -579,6 +581,9 @@ export interface GameState {
   playerStats: PlayerStats[];
   warHeroes: WarHero[];          // populated at match end — top unit per player
   fallenHeroes: WarHero[];       // units with kills > 0 that died during the match
+  fogOfWar: boolean;             // whether fog of war is enabled
+  /** Per-team tile visibility: teamIndex → flat boolean array [y * mapWidth + x] */
+  visibility: boolean[][];
 }
 
 // === Commands (client -> server) ===

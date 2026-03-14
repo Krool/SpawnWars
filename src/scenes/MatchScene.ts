@@ -20,6 +20,7 @@ export interface PartyConfig {
   mapDef: MapDef;
   /** Per-slot display names (for results screen). */
   slotNames?: { [slot: string]: string };
+  fogOfWar?: boolean;
 }
 
 export class MatchScene implements Scene {
@@ -29,6 +30,7 @@ export class MatchScene implements Scene {
   private playerRace: Race = Race.Crown;
   private botDifficulty: BotDifficultyLevel = BotDifficultyLevel.Medium;
   private selectedMap: MapDef = DUEL_MAP;
+  private fogOfWar = false;
   private partyConfig: PartyConfig | null = null;
   private ui: UIAssets;
   private musicPlayer: MusicPlayer;
@@ -46,10 +48,11 @@ export class MatchScene implements Scene {
     this.onQuitGame = cb;
   }
 
-  setPlayerRace(race: Race, botDifficulty: BotDifficultyLevel = BotDifficultyLevel.Medium, mapDef?: MapDef): void {
+  setPlayerRace(race: Race, botDifficulty: BotDifficultyLevel = BotDifficultyLevel.Medium, mapDef?: MapDef, fogOfWar = false): void {
     this.playerRace = race;
     this.botDifficulty = botDifficulty;
     this.selectedMap = mapDef ?? DUEL_MAP;
+    this.fogOfWar = fogOfWar;
     this.partyConfig = null; // solo mode
   }
 
@@ -69,6 +72,7 @@ export class MatchScene implements Scene {
         partyCode: pc.partyCode,
         botDifficulty: pc.botDifficulty,
         mapDef: pc.mapDef,
+        fogOfWar: pc.fogOfWar,
       });
       // Pass display info for results screen
       if (pc.slotNames) this.game.slotNames = pc.slotNames;
@@ -79,7 +83,7 @@ export class MatchScene implements Scene {
       }
     } else {
       // Solo mode (existing behavior)
-      this.game = new Game(this.canvas, this.playerRace, this.ui, undefined, this.botDifficulty, this.selectedMap);
+      this.game = new Game(this.canvas, this.playerRace, this.ui, undefined, this.botDifficulty, this.selectedMap, this.fogOfWar);
       // Solo: all non-player slots are medium bots
       const mapDef = this.selectedMap;
       for (let i = 0; i < mapDef.maxPlayers; i++) {

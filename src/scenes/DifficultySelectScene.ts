@@ -35,6 +35,7 @@ const MODE_OPTIONS: ModeOption[] = [
 
 const LAST_DIFFICULTY_KEY = 'spawnwars.lastDifficulty';
 const LAST_MODE_KEY = 'spawnwars.lastMode';
+const LAST_FOG_KEY = 'spawnwars.lastFogOfWar';
 
 function shadowText(
   ctx: CanvasRenderingContext2D, text: string, x: number, y: number,
@@ -50,11 +51,13 @@ export class DifficultySelectScene implements Scene {
   private manager: SceneManager;
   private canvas: HTMLCanvasElement;
   private ui: UIAssets;
-  private onConfirm: (level: BotDifficultyLevel, mapDef: MapDef, teamSize: number) => void;
+  private onConfirm: (level: BotDifficultyLevel, mapDef: MapDef, teamSize: number, fogOfWar: boolean) => void;
   private selectedIndex = 1;
   private hoverIndex = -1;
   private modeIndex = 0;
   private modeHoverIndex = -1;
+  private fogOfWar = true;
+  private fogHover = false;
   private tick = 0;
   private sceneAge = 0;
 
@@ -63,7 +66,7 @@ export class DifficultySelectScene implements Scene {
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private touchHandler: ((e: TouchEvent) => void) | null = null;
 
-  constructor(manager: SceneManager, canvas: HTMLCanvasElement, ui: UIAssets, onConfirm: (level: BotDifficultyLevel, mapDef: MapDef, teamSize: number) => void) {
+  constructor(manager: SceneManager, canvas: HTMLCanvasElement, ui: UIAssets, onConfirm: (level: BotDifficultyLevel, mapDef: MapDef, teamSize: number, fogOfWar: boolean) => void) {
     this.manager = manager;
     this.canvas = canvas;
     this.ui = ui;
@@ -90,6 +93,10 @@ export class DifficultySelectScene implements Scene {
         this.modeIndex = (this.modeIndex + delta + MODE_OPTIONS.length) % MODE_OPTIONS.length;
         this.saveSelections();
       }
+      if (e.key === 'f') {
+        this.fogOfWar = !this.fogOfWar;
+        this.saveSelections();
+      }
       if (e.key === 'Enter' || e.key === ' ') {
         this.confirmSelection();
       }
@@ -99,6 +106,11 @@ export class DifficultySelectScene implements Scene {
     this.clickHandler = (e) => {
       const [cx, cy] = this.toCanvas(e.clientX, e.clientY);
       if (this.isBackButtonAt(cx, cy)) { this.manager.switchTo('raceSelect'); return; }
+      if (this.isFogToggleAt(cx, cy)) {
+        this.fogOfWar = !this.fogOfWar;
+        this.saveSelections();
+        return;
+      }
       const modeIdx = this.getModeButtonIndexAt(cx, cy);
       if (modeIdx >= 0) {
         this.modeIndex = modeIdx;
@@ -120,6 +132,7 @@ export class DifficultySelectScene implements Scene {
       const [cx, cy] = this.toCanvas(e.clientX, e.clientY);
       this.hoverIndex = this.getCardIndexAt(cx, cy);
       this.modeHoverIndex = this.getModeButtonIndexAt(cx, cy);
+      this.fogHover = this.isFogToggleAt(cx, cy);
     };
 
     this.touchHandler = (e) => {
@@ -128,6 +141,11 @@ export class DifficultySelectScene implements Scene {
       if (!touch) return;
       const [cx, cy] = this.toCanvas(touch.clientX, touch.clientY);
       if (this.isBackButtonAt(cx, cy)) { this.manager.switchTo('raceSelect'); return; }
+      if (this.isFogToggleAt(cx, cy)) {
+        this.fogOfWar = !this.fogOfWar;
+        this.saveSelections();
+        return;
+      }
       const modeIdx = this.getModeButtonIndexAt(cx, cy);
       if (modeIdx >= 0) {
         this.modeIndex = modeIdx;
@@ -178,6 +196,9 @@ export class DifficultySelectScene implements Scene {
       const savedMode = localStorage.getItem(LAST_MODE_KEY);
       const savedModeIndex = MODE_OPTIONS.findIndex((opt) => opt.label === savedMode);
       if (savedModeIndex >= 0) this.modeIndex = savedModeIndex;
+
+      const savedFog = localStorage.getItem(LAST_FOG_KEY);
+      this.fogOfWar = savedFog === null ? true : savedFog === 'true';
     } catch {}
   }
 
@@ -185,13 +206,14 @@ export class DifficultySelectScene implements Scene {
     try {
       localStorage.setItem(LAST_DIFFICULTY_KEY, DIFFICULTIES[this.selectedIndex].level);
       localStorage.setItem(LAST_MODE_KEY, MODE_OPTIONS[this.modeIndex].label);
+      localStorage.setItem(LAST_FOG_KEY, String(this.fogOfWar));
     } catch {}
   }
 
   private confirmSelection(): void {
     this.saveSelections();
     const mode = MODE_OPTIONS[this.modeIndex];
-    this.onConfirm(DIFFICULTIES[this.selectedIndex].level, mode.map, mode.teamSize);
+    this.onConfirm(DIFFICULTIES[this.selectedIndex].level, mode.map, mode.teamSize, this.fogOfWar);
   }
 
   // --- Mode buttons layout (horizontal row of 3) ---
@@ -245,7 +267,8 @@ export class DifficultySelectScene implements Scene {
     const modeBottom = modeBtns[0].y + modeBtns[0].h;
     const topMargin = modeBottom + (compact ? 8 : 14);
     const cardH = compact ? 38 : 48;
-    const totalH = DIFFICULTIES.length * cardH + (DIFFICULTIES.length - 1) * gap;
+    const fogH = compact ? 30 : 36;
+    const totalH = DIFFICULTIES.length * cardH + (DIFFICULTIES.length - 1) * gap + gap + fogH;
     const btnSpace = compact ? 56 : 80;
     const startY = topMargin + Math.max(0, (h - topMargin - btnSpace - totalH) / 2);
     const startX = (w - cardW) / 2;
@@ -293,6 +316,30 @@ export class DifficultySelectScene implements Scene {
     const { backX, btnW, btnH, btnY } = this.getButtonRow();
     const pad = 8;
     return cx >= backX - pad && cx <= backX + btnW + pad && cy >= btnY - pad && cy <= btnY + btnH + pad;
+  }
+
+  private getFogToggleLayout(): { x: number; y: number; w: number; h: number } {
+    const cards = this.getCardLayout();
+    const lastCard = cards[cards.length - 1];
+    const compact = this.compact;
+    const toggleH = compact ? 30 : 36;
+    const toggleW = Math.min(this.canvas.clientWidth * 0.9, 420);
+    const cardBottom = lastCard.y + lastCard.h;
+    const { btnY } = this.getButtonRow();
+    // Center the toggle vertically between last card and button row
+    const toggleY = cardBottom + (btnY - cardBottom - toggleH) / 2;
+    return {
+      x: (this.canvas.clientWidth - toggleW) / 2,
+      y: toggleY,
+      w: toggleW,
+      h: toggleH,
+    };
+  }
+
+  private isFogToggleAt(cx: number, cy: number): boolean {
+    const t = this.getFogToggleLayout();
+    const pad = 4;
+    return cx >= t.x - pad && cx <= t.x + t.w + pad && cy >= t.y - pad && cy <= t.y + t.h + pad;
   }
 
   render(ctx: CanvasRenderingContext2D): void {
@@ -404,6 +451,50 @@ export class DifficultySelectScene implements Scene {
       }
     }
 
+    // --- Fog of War toggle ---
+    const fogLayout = this.getFogToggleLayout();
+    {
+      const fl = fogLayout;
+      const compact = this.compact;
+      const bgPadX = Math.round(fl.w * 0.075);
+      const bgPadY = Math.round(fl.h * 0.06);
+      this.ui.drawWoodTable(ctx, fl.x - bgPadX, fl.y - bgPadY, fl.w + bgPadX * 2, fl.h + bgPadY * 2);
+
+      if (this.fogHover) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(fl.x + 1, fl.y + 1, fl.w - 2, fl.h - 2);
+      }
+
+      const padX = compact ? 10 : 14;
+      const labelSize = compact ? 13 : 16;
+      ctx.font = `bold ${labelSize}px monospace`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      // Checkbox
+      const cbSize = compact ? 14 : 18;
+      const cbX = fl.x + padX;
+      const cbY = fl.y + (fl.h - cbSize) / 2;
+      ctx.strokeStyle = this.fogOfWar ? '#66d9ef' : 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cbX, cbY, cbSize, cbSize);
+      if (this.fogOfWar) {
+        ctx.fillStyle = '#66d9ef';
+        ctx.fillRect(cbX + 3, cbY + 3, cbSize - 6, cbSize - 6);
+      }
+
+      shadowText(ctx, 'FOG OF WAR', cbX + cbSize + 8, fl.y + fl.h / 2,
+        this.fogOfWar ? '#66d9ef' : 'rgba(255,255,255,0.7)', 'rgba(0,0,0,0.7)');
+
+      const descSize = Math.max(9, labelSize * 0.7);
+      ctx.font = `bold ${labelSize}px monospace`;
+      const boldLabelW = ctx.measureText('FOG OF WAR').width;
+      ctx.font = `${descSize}px monospace`;
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fillText('Hidden map, revealed by your units', cbX + cbSize + 8 + boldLabelW + 12, fl.y + fl.h / 2);
+    }
+
     // Bottom button row
     const { backX, startX, btnW, btnH, btnY } = this.getButtonRow();
     const btnFontSize = this.compact ? 13 : 16;
@@ -441,6 +532,7 @@ export class DifficultySelectScene implements Scene {
     ctx.font = `bold ${Math.max(9, hintSize)}px monospace`;
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = DIFFICULTIES[this.selectedIndex].color;
-    ctx.fillText(`${MODE_OPTIONS[this.modeIndex].label}  ${DIFFICULTIES[this.selectedIndex].label}`, w / 2, hintY);
+    const fogLabel = this.fogOfWar ? '  FOG' : '';
+    ctx.fillText(`${MODE_OPTIONS[this.modeIndex].label}  ${DIFFICULTIES[this.selectedIndex].label}${fogLabel}`, w / 2, hintY);
   }
 }

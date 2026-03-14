@@ -1,6 +1,6 @@
 import { createInitialState, simulateTick, getTeamAlleyOrigin } from '../simulation/GameState';
 import { BuildingType, GameCommand, Lane, Race, Team, TICK_RATE } from '../simulation/types';
-import { UNIT_STATS } from '../simulation/data';
+import { UNIT_STATS, SPAWN_INTERVAL_TICKS } from '../simulation/data';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -131,8 +131,8 @@ function testPurchaseUpgradeAffectsFutureSpawns(): void {
   runTick(state, [{ type: 'purchase_upgrade', playerId: 0, buildingId: spawner.id, choice: 'E' }]);
   assert(spawner.upgradePath.join(',') === 'A,B,D', 'no further upgrades should be allowed past tier2');
 
-  for (let i = 0; i < 10 * TICK_RATE + 1; i++) runTick(state);
-  for (let i = 0; i < 10 * TICK_RATE + 1; i++) runTick(state);
+  for (let i = 0; i < SPAWN_INTERVAL_TICKS + 1; i++) runTick(state);
+  for (let i = 0; i < SPAWN_INTERVAL_TICKS + 1; i++) runTick(state);
 
   const spawned = state.units.find(u => u.playerId === 0 && u.category === 'melee');
   assert(spawned, 'expected at least one spawned melee unit after upgrades');

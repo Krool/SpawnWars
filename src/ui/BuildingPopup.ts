@@ -38,7 +38,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 // Per-race caster support ability descriptions
 const CASTER_SUPPORT_DESC: Record<Race, string> = {
-  [Race.Crown]: 'Shields 2 nearby allies, absorbing 20 dmg each.',
+  [Race.Crown]: 'Shields 2 nearby allies, absorbing 12 dmg each.',
   [Race.Horde]: 'Hastes up to 5 nearby allies, boosting attack speed.',
   [Race.Goblins]: 'Hexes nearby enemies, slowing their movement.',
   [Race.Oozlings]: 'Hastes up to 3 nearby allies.',
@@ -58,7 +58,7 @@ const MELEE_ONHIT_DESC: Record<Race, string> = {
   [Race.Demon]: 'Burns enemies on every melee hit.',
   [Race.Deep]: 'Slows enemies on hit.',
   [Race.Wild]: 'Poisons enemies on hit (burn).',
-  [Race.Geists]: 'Revives once at 30% HP.',
+  [Race.Geists]: 'Burns enemies on hit. 15% lifesteal.',
   [Race.Tenders]: 'Regenerates 1 HP/s passively.',
 };
 

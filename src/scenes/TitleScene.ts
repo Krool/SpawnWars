@@ -252,7 +252,7 @@ function applyStatus(target: DuelUnit, type: StatusType, stacks: number): void {
   } else {
     target.statusEffects.push({ type, stacks: Math.min(stacks, maxStacks), duration });
   }
-  if (type === StatusType.Shield && target.shieldHp <= 0) target.shieldHp = 20;
+  if (type === StatusType.Shield && target.shieldHp <= 0) target.shieldHp = 12;
 }
 
 function dealDuelDamage(target: DuelUnit, amount: number): void {
@@ -3206,7 +3206,7 @@ export class TitleScene implements Scene {
       ctx.fillRect(barX, barY, barW * hpPct, barH);
 
       if (unit.shieldHp > 0) {
-        const shieldPct = Math.min(1, unit.shieldHp / 20);
+        const shieldPct = Math.min(1, unit.shieldHp / 12);
         ctx.fillStyle = 'rgba(100,181,246,0.7)';
         ctx.fillRect(barX, barY, barW * shieldPct, barH);
       }

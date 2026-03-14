@@ -55,6 +55,8 @@ export class InputHandler {
   private canvas: HTMLCanvasElement;
   private camera: Camera;
   private selectedBuilding: BuildingType | null = null;
+  /** Expose selected building for Renderer grid visibility. */
+  get placingBuilding(): BuildingType | null { return this.selectedBuilding; }
   private hoveredGridSlot: { gx: number; gy: number; isAlley: boolean } | null = null;
   private hoveredBuildingId: number | null = null;
   private selectedBuildingId: number | null = null;

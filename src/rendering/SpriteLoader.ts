@@ -281,6 +281,12 @@ import waterRock1 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Fr
 import waterRock2 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Decorations/Rocks in the Water/Water Rocks_02.png?url';
 import bush1 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Decorations/Bushes/Bushe1.png?url';
 import bush2 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Decorations/Bushes/Bushe2.png?url';
+import bush3 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Decorations/Bushes/Bushe3.png?url';
+import bush4 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Decorations/Bushes/Bushe4.png?url';
+import tilemapColor2 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Tileset/Tilemap_color2.png?url';
+import rock2 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Decorations/Rocks/Rock2.png?url';
+import rock3 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Decorations/Rocks/Rock3.png?url';
+import rock4 from '../assets/images/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Decorations/Rocks/Rock4.png?url';
 
 // ============================================================
 // RESOURCE SPRITES
@@ -926,6 +932,12 @@ export const TERRAIN_SPRITES = {
   waterRock2: tsSheet(waterRock2, 1024, 64),
   bush1: tsSheet(bush1, 1024, 128),
   bush2: tsSheet(bush2, 1024, 128),
+  bush3: tsSheet(bush3, 1024, 128),
+  bush4: tsSheet(bush4, 1024, 128),
+  tilemap2: singleFrame(tilemapColor2, 576, 384),
+  rock2: singleFrame(rock2, 64, 64),
+  rock3: singleFrame(rock3, 64, 64),
+  rock4: singleFrame(rock4, 64, 64),
 };
 
 // ============================================================

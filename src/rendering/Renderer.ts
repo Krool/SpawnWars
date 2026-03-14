@@ -18,7 +18,7 @@ import {
   ScreenShake, WeatherSystem, AmbientParticles,
   ProjectileTrails, ConstructionAnims, HitFlashTracker, CombatVFX, triggerHaptic,
 } from './VisualEffects';
-import { getSafeTop } from '../ui/SafeArea';
+import { getSafeTop, getSafeBottom } from '../ui/SafeArea';
 
 const T = TILE_SIZE;
 const LANE_LEFT_COLOR = '#4fc3f7';
@@ -89,6 +89,8 @@ export class Renderer {
   ui: UIAssets;
   /** Which player slot the local user controls (0 = host/solo, 1 = guest). */
   localPlayerId = 0;
+  /** Set by InputHandler — the building type the player is currently placing, or null. */
+  placingBuilding: BuildingType | null = null;
   private terrainCache: HTMLCanvasElement | null = null;
   private waterCache: HTMLCanvasElement | null = null;
   private terrainReady = false;
@@ -131,6 +133,9 @@ export class Renderer {
   private mapW = MAP_WIDTH;
   private mapH = MAP_HEIGHT;
   private mapDef: MapDef = DUEL_MAP;
+  // Fog of war
+  private fogCache: HTMLCanvasElement | null = null;
+  private fogCacheTick = -1;
 
   constructor(canvas: HTMLCanvasElement, ui?: UIAssets) {
     this.canvas = canvas;
@@ -163,6 +168,54 @@ export class Renderer {
     }
     this.prevX.set(id, x);
     return this.facing.get(id) ?? defaultLeft;
+  }
+
+  /** Check if a world-tile position is visible to the local player's team */
+  private isTileVisible(state: GameState, tileX: number, tileY: number): boolean {
+    if (!state.fogOfWar) return true;
+    const team = state.players[this.localPlayerId]?.team ?? 0;
+    const vis = state.visibility[team];
+    if (!vis) return true;
+    const ix = Math.floor(tileX);
+    const iy = Math.floor(tileY);
+    if (ix < 0 || ix >= state.mapDef.width || iy < 0 || iy >= state.mapDef.height) return false;
+    return vis[iy * state.mapDef.width + ix];
+  }
+
+  /** Draw fog of war overlay — dark tiles where the team has no vision */
+  private drawFogOfWar(ctx: CanvasRenderingContext2D, state: GameState): void {
+    const team = state.players[this.localPlayerId]?.team ?? 0;
+    const vis = state.visibility[team];
+    if (!vis) return;
+
+    const mw = state.mapDef.width;
+    const mh = state.mapDef.height;
+
+    // Rebuild fog cache when visibility changes
+    if (!this.fogCache || this.fogCacheTick !== state.tick) {
+      this.fogCacheTick = state.tick;
+      if (!this.fogCache) {
+        this.fogCache = document.createElement('canvas');
+      }
+      this.fogCache.width = mw;
+      this.fogCache.height = mh;
+      const fctx = this.fogCache.getContext('2d')!;
+      // Draw black pixels for hidden tiles using ImageData for speed
+      const imgData = fctx.createImageData(mw, mh);
+      const d = imgData.data;
+      for (let i = 0; i < mw * mh; i++) {
+        if (!vis[i]) {
+          const p = i * 4;
+          d[p + 3] = 180; // semi-transparent black (r,g,b default to 0)
+        }
+      }
+      fctx.putImageData(imgData, 0, 0);
+    }
+
+    // Draw fog cache scaled to world coordinates (bilinear smoothing for soft edges)
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.fogCache, 0, 0, mw * T, mh * T);
+    ctx.imageSmoothingEnabled = false;
   }
 
   render(state: GameState, networkLatencyMs?: number, desyncDetected?: boolean, peerDisconnected?: boolean, waitingForAllyMs?: number): void {
@@ -268,6 +321,11 @@ export class Renderer {
     this.drawDeathEffects(ctx);
     this.drawFloatingTexts(ctx, state);
     this.drawNukeEffects(ctx, state);
+
+    // Fog of war overlay (world-space, after entities, before day/night)
+    if (state.fogOfWar) {
+      this.drawFogOfWar(ctx, state);
+    }
 
     // Weather particles (world-space)
     this.weather.drawWorld(ctx);
@@ -412,6 +470,27 @@ export class Renderer {
       }
       wctx.globalAlpha = 1;
     }
+
+    // Water depth: darken tiles far from land for sense of depth
+    for (let y = 0; y < mH; y++) {
+      for (let x = 0; x < mW; x++) {
+        if (isLand(x, y)) continue;
+        // Find minimum distance to any land tile (cheap taxicab check)
+        let minDist = 99;
+        for (let d = 1; d <= 5; d++) {
+          if (isLand(x - d, y) || isLand(x + d, y) || isLand(x, y - d) || isLand(x, y + d)) {
+            minDist = d; break;
+          }
+        }
+        if (minDist > 1) {
+          // Shallow near coast (dist 2), deep far out (dist 5+)
+          const depth = Math.min(1, (minDist - 1) / 4);
+          wctx.fillStyle = `rgba(0,15,30,${(depth * 0.15).toFixed(3)})`;
+          wctx.fillRect(x * T, y * T, T, T);
+        }
+      }
+    }
+
     this.waterCache = wc;
 
     // ---- Build land terrain cache (cliff faces + grass + decorations) ----
@@ -476,6 +555,9 @@ export class Renderer {
     }
 
     // 2. Autotiled grass with proper edge tiles (9-patch from tilemap)
+    //    Uses tilemap2 for ~25% of center tiles to create organic grass patches
+    const tilemap2Data = this.sprites.getTerrainSprite('tilemap2');
+    const tilemap2Img = tilemap2Data ? tilemap2Data[0] : null;
     const OV = 3; // pixel overhang for edge tiles
     for (let y = 0; y < mH; y++) {
       for (let x = 0; x < mW; x++) {
@@ -499,11 +581,78 @@ export class Renderer {
         else if (!e)       { gsx = 2 * S; gsy = S; }      // right edge
         else               { gsx = S;     gsy = S; edge = false; } // center
 
+        // For center tiles, use tilemap2 for clustered color patches (~25%)
+        const hash = ((Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1 + 1) % 1;
+        const useAlt = !edge && tilemap2Img && hash < 0.25;
+        const srcImg = useAlt ? tilemap2Img : tilemap;
+
         if (edge) {
-          tctx.drawImage(tilemap, gsx, gsy, S, S,
+          tctx.drawImage(srcImg, gsx, gsy, S, S,
             x * T - OV, y * T - OV, T + OV * 2, T + OV * 2);
         } else {
-          tctx.drawImage(tilemap, gsx, gsy, S, S, x * T, y * T, T, T);
+          tctx.drawImage(srcImg, gsx, gsy, S, S, x * T, y * T, T, T);
+        }
+      }
+    }
+
+    // 2b. Low-frequency warm/cool color zones (sampled every 4 tiles, then per-tile noise)
+    for (let y = 0; y < mH; y++) {
+      for (let x = 0; x < mW; x++) {
+        if (!isLand(x, y)) continue;
+        // Low-freq zone color: smooth sine-based field sampled at ~4-tile scale
+        const zoneVal = Math.sin(x * 0.25 + 1.7) * Math.sin(y * 0.19 + 0.3)
+                      + Math.sin(x * 0.13 - y * 0.11 + 2.5) * 0.5;
+        if (zoneVal > 0.3) {
+          // Warm sunlit zone (slight golden tint)
+          tctx.fillStyle = `rgba(255,230,140,${(0.025 * Math.min(1, (zoneVal - 0.3) / 0.7)).toFixed(4)})`;
+          tctx.fillRect(x * T, y * T, T, T);
+        } else if (zoneVal < -0.3) {
+          // Cool shaded zone (slight blue-green tint)
+          tctx.fillStyle = `rgba(100,180,160,${(0.03 * Math.min(1, (-zoneVal - 0.3) / 0.7)).toFixed(4)})`;
+          tctx.fillRect(x * T, y * T, T, T);
+        }
+        // Per-tile noise on top
+        const h = ((Math.sin(x * 7.137 + y * 11.921) * 23421.631) % 1 + 1) % 1;
+        if (h < 0.15) {
+          tctx.fillStyle = 'rgba(0,0,0,0.04)';
+          tctx.fillRect(x * T, y * T, T, T);
+        } else if (h > 0.85) {
+          tctx.fillStyle = 'rgba(255,255,200,0.03)';
+          tctx.fillRect(x * T, y * T, T, T);
+        }
+      }
+    }
+
+    // 2c. Cliff-edge shadow on grass tiles above south-facing cliffs
+    //     + light highlight on grass tiles above north-facing water (top-left light)
+    for (let y = 0; y < mH; y++) {
+      for (let x = 0; x < mW; x++) {
+        if (!isLand(x, y)) continue;
+        const px = x * T;
+        const py = y * T;
+        if (!isLand(x, y + 1)) {
+          // South cliff shadow
+          const grad = tctx.createLinearGradient(px, py + T * 0.5, px, py + T);
+          grad.addColorStop(0, 'rgba(0,0,0,0)');
+          grad.addColorStop(1, 'rgba(0,30,20,0.15)');
+          tctx.fillStyle = grad;
+          tctx.fillRect(px, py + T * 0.5, T, T * 0.5);
+        }
+        if (!isLand(x, y - 1)) {
+          // North edge highlight (light from above)
+          const grad = tctx.createLinearGradient(px, py, px, py + T * 0.4);
+          grad.addColorStop(0, 'rgba(255,255,220,0.06)');
+          grad.addColorStop(1, 'rgba(255,255,220,0)');
+          tctx.fillStyle = grad;
+          tctx.fillRect(px, py, T, T * 0.4);
+        }
+        if (!isLand(x - 1, y)) {
+          // West edge highlight (light from left)
+          const grad = tctx.createLinearGradient(px, py, px + T * 0.3, py);
+          grad.addColorStop(0, 'rgba(255,255,220,0.04)');
+          grad.addColorStop(1, 'rgba(255,255,220,0)');
+          tctx.fillStyle = grad;
+          tctx.fillRect(px, py, T * 0.3, T);
         }
       }
     }
@@ -534,26 +683,60 @@ export class Renderer {
       }
     }
 
-    // 4. Scatter bush decorations on grass
-    const bush1Data = this.sprites.getTerrainSprite('bush1');
-    const bush2Data = this.sprites.getTerrainSprite('bush2');
-    if (bush1Data || bush2Data) {
-      for (let i = 0; i < 40; i++) {
-        // Place bushes randomly within playable area
+    // Helper: distance to nearest water (cardinal, max 6)
+    const distToWater = (tx: number, ty: number): number => {
+      for (let d = 1; d <= 6; d++) {
+        if (!isLand(tx - d, ty) || !isLand(tx + d, ty) || !isLand(tx, ty - d) || !isLand(tx, ty + d)) return d;
+      }
+      return 7;
+    };
+
+    // 4. Scatter bush decorations on grass (4 varieties, biased toward coastlines)
+    const bushes = [
+      this.sprites.getTerrainSprite('bush1'),
+      this.sprites.getTerrainSprite('bush2'),
+      this.sprites.getTerrainSprite('bush3'),
+      this.sprites.getTerrainSprite('bush4'),
+    ].filter(Boolean) as [HTMLImageElement, SpriteDef][];
+    if (bushes.length > 0) {
+      for (let i = 0; i < 70; i++) {
         const bx = Math.floor(rand() * mW);
         const by = Math.floor(rand() * mH);
         if (!mapDef.isPlayable(bx, by)) continue;
-        // Ensure we're not too close to the edge
         if (!mapDef.isPlayable(bx - 2, by) || !mapDef.isPlayable(bx + 2, by)) continue;
-        const x = bx, y = by;
-        const bushData = (i % 2 === 0 && bush1Data) ? bush1Data : (bush2Data ?? bush1Data);
-        if (!bushData) continue;
-        const [bImg, bDef] = bushData;
+        // Density gradient: 80% chance near coast (dist 2-4), 30% chance deep inland
+        const dist = distToWater(bx, by);
+        const placePct = dist <= 4 ? 0.8 : 0.3;
+        if (rand() > placePct) continue;
+        const [bImg, bDef] = bushes[Math.floor(rand() * bushes.length)];
         const frame = Math.floor(rand() * bDef.cols);
         const s = T * (1.0 + rand() * 0.6);
         const aspect = bDef.frameW / bDef.frameH;
         tctx.globalAlpha = 0.7 + rand() * 0.3;
-        drawSpriteFrame(tctx, bImg, bDef, frame, x * T - s / 2, y * T - s * 0.5, s * aspect, s);
+        drawSpriteFrame(tctx, bImg, bDef, frame, bx * T - s / 2, by * T - s * 0.5, s * aspect, s);
+      }
+      tctx.globalAlpha = 1;
+    }
+
+    // 5. Scatter small land rocks on grass (biased toward coastlines)
+    const rocks = [
+      this.sprites.getTerrainSprite('rock2'),
+      this.sprites.getTerrainSprite('rock3'),
+      this.sprites.getTerrainSprite('rock4'),
+    ].filter(Boolean) as [HTMLImageElement, SpriteDef][];
+    if (rocks.length > 0) {
+      for (let i = 0; i < 45; i++) {
+        const rx = Math.floor(rand() * mW);
+        const ry = Math.floor(rand() * mH);
+        if (!mapDef.isPlayable(rx, ry)) continue;
+        if (!mapDef.isPlayable(rx - 1, ry) || !mapDef.isPlayable(rx + 1, ry)) continue;
+        const dist = distToWater(rx, ry);
+        const placePct = dist <= 3 ? 0.7 : 0.25;
+        if (rand() > placePct) continue;
+        const [rImg] = rocks[Math.floor(rand() * rocks.length)];
+        const s = T * (0.5 + rand() * 0.4);
+        tctx.globalAlpha = 0.5 + rand() * 0.3;
+        tctx.drawImage(rImg, rx * T - s / 2 + rand() * T * 0.3, ry * T - s / 2 + rand() * T * 0.3, s, s);
       }
       tctx.globalAlpha = 1;
     }
@@ -582,6 +765,26 @@ export class Renderer {
       if (alpha <= 0) continue;
       ctx.fillStyle = `rgba(180,240,255,${alpha.toFixed(3)})`;
       ctx.fillRect(0, bandY - bandH / 2, this.mapW * T, bandH);
+    }
+
+    // 1b. Specular highlights: drifting bright spots on open water
+    for (let y = sy; y < ey; y++) {
+      for (let x = sx; x < ex; x++) {
+        if (this.mapDef.isPlayable(x, y)) continue;
+        // Only on tiles away from shore (open water)
+        const nearShore = this.mapDef.isPlayable(x - 1, y) || this.mapDef.isPlayable(x + 1, y)
+          || this.mapDef.isPlayable(x, y - 1) || this.mapDef.isPlayable(x, y + 1);
+        if (nearShore) continue;
+        // Two overlapping sine fields create drifting highlights
+        const s1 = Math.sin(tick * 0.025 + x * 0.7 + y * 0.4);
+        const s2 = Math.sin(tick * 0.018 - x * 0.3 + y * 0.65 + 1.5);
+        const bright = s1 * s2; // peaks when both sines align
+        if (bright > 0.6) {
+          const a = (bright - 0.6) * 0.2; // max ~0.08 alpha
+          ctx.fillStyle = `rgba(220,245,255,${a.toFixed(3)})`;
+          ctx.fillRect(x * T + T * 0.2, y * T + T * 0.2, T * 0.6, T * 0.6);
+        }
+      }
     }
 
     // 2. Per-tile shimmer on water edge tiles
@@ -1002,8 +1205,16 @@ export class Renderer {
   // === Build Grids ===
 
   private drawBuildGrids(ctx: CanvasRenderingContext2D, state: GameState): void {
+    const earlyReveal = state.tick < 200; // first 10 seconds
+    const placingMilitary = this.placingBuilding !== null
+      && this.placingBuilding !== BuildingType.HarvesterHut
+      && this.placingBuilding !== BuildingType.Tower;
+    if (!earlyReveal && !placingMilitary) return;
+
     const maxP = state.mapDef.maxPlayers;
     for (let p = 0; p < maxP; p++) {
+      // After early reveal, only show the local player's grid
+      if (!earlyReveal && p !== this.localPlayerId) continue;
       const origin = getBuildGridOrigin(p, state.mapDef, state.players);
       const player = state.players[p];
       if (!player || player.isEmpty) continue;
@@ -1048,8 +1259,13 @@ export class Renderer {
   // === Hut Zones ===
 
   private drawHutZones(ctx: CanvasRenderingContext2D, state: GameState): void {
+    const earlyReveal = state.tick < 200;
+    const placingHut = this.placingBuilding === BuildingType.HarvesterHut;
+    if (!earlyReveal && !placingHut) return;
+
     const maxP = state.mapDef.maxPlayers;
     for (let p = 0; p < maxP; p++) {
+      if (!earlyReveal && p !== this.localPlayerId) continue;
       const player = state.players[p];
       if (!player || player.isEmpty) continue;
       const origin = getHutGridOrigin(p, state.mapDef, state.players);
@@ -1090,7 +1306,13 @@ export class Renderer {
   // === Tower Alleys ===
 
   private drawTowerAlleys(ctx: CanvasRenderingContext2D, state: GameState): void {
+    const earlyReveal = state.tick < 200;
+    const placingTower = this.placingBuilding === BuildingType.Tower;
+    if (!earlyReveal && !placingTower) return;
+
+    const localTeam = state.players[this.localPlayerId]?.team ?? Team.Bottom;
     for (const team of [Team.Bottom, Team.Top]) {
+      if (!earlyReveal && team !== localTeam) continue;
       const origin = getTeamAlleyOrigin(team, state.mapDef);
       const color = team === Team.Bottom ? '41,121,255' : '255,23,68';
 
@@ -1139,6 +1361,8 @@ export class Renderer {
     const vpY0 = this.camera.y - margin;
     const vpX1 = this.camera.x + this.canvas.clientWidth / this.camera.zoom + margin;
     const vpY1 = this.camera.y + this.canvas.clientHeight / this.camera.zoom + margin;
+    const fog = state.fogOfWar;
+    const localTeam = state.players[this.localPlayerId]?.team ?? 0;
 
     // Reuse sort buffer — reset length without reallocating
     const buf = this.sortBuf;
@@ -1153,54 +1377,61 @@ export class Renderer {
       n++;
     }
 
-    // Buildings — cull off-screen
+    // Buildings — cull off-screen + fog filter
     for (let i = 0; i < state.buildings.length; i++) {
       const b = state.buildings[i];
       const px = b.worldX * T, py = b.worldY * T;
       if (px < vpX0 || px > vpX1 || py < vpY0 || py > vpY1) continue;
+      // Fog: hide enemy buildings in unseen tiles
+      if (fog && state.players[b.playerId]?.team !== localTeam && !this.isTileVisible(state, b.worldX, b.worldY)) continue;
       const sy = (b.worldY + 1) * T;
       if (n < buf.length) { buf[n].y = sy; buf[n].kind = 1; buf[n].idx = i; }
       else buf.push({ y: sy, kind: 1, idx: i });
       n++;
     }
 
-    // Projectiles — cull off-screen
+    // Projectiles — cull off-screen + fog filter
     for (let i = 0; i < state.projectiles.length; i++) {
       const p = state.projectiles[i];
       const px = p.x * T, py = p.y * T;
       if (px < vpX0 || px > vpX1 || py < vpY0 || py > vpY1) continue;
+      if (fog && !this.isTileVisible(state, p.x, p.y)) continue;
       if (n < buf.length) { buf[n].y = py; buf[n].kind = 2; buf[n].idx = i; }
       else buf.push({ y: py, kind: 2, idx: i });
       n++;
     }
 
-    // Units — cull off-screen
+    // Units — cull off-screen + fog filter
     for (let i = 0; i < state.units.length; i++) {
       const u = state.units[i];
       if (u.hp <= 0) continue;
       const px = u.x * T, py = u.y * T;
       if (px < vpX0 || px > vpX1 || py < vpY0 || py > vpY1) continue;
+      // Fog: hide enemy units in unseen tiles
+      if (fog && u.team !== localTeam && !this.isTileVisible(state, u.x, u.y)) continue;
       if (n < buf.length) { buf[n].y = py; buf[n].kind = 3; buf[n].idx = i; }
       else buf.push({ y: py, kind: 3, idx: i });
       n++;
     }
 
-    // Dead units — cull off-screen
+    // Dead units — cull off-screen + fog filter
     for (let i = 0; i < this.deadUnits.length; i++) {
       const d = this.deadUnits[i];
       const px = d.x * T, py = d.y * T;
       if (px < vpX0 || px > vpX1 || py < vpY0 || py > vpY1) continue;
+      if (fog && d.team !== localTeam && !this.isTileVisible(state, d.x, d.y)) continue;
       if (n < buf.length) { buf[n].y = py; buf[n].kind = 4; buf[n].idx = i; }
       else buf.push({ y: py, kind: 4, idx: i });
       n++;
     }
 
-    // Harvesters — cull off-screen
+    // Harvesters — cull off-screen + fog filter
     for (let i = 0; i < state.harvesters.length; i++) {
       const h = state.harvesters[i];
       if (h.state === 'dead') continue;
       const px = h.x * T, py = h.y * T;
       if (px < vpX0 || px > vpX1 || py < vpY0 || py > vpY1) continue;
+      if (fog && state.players[h.playerId]?.team !== localTeam && !this.isTileVisible(state, h.x, h.y)) continue;
       if (n < buf.length) { buf[n].y = py; buf[n].kind = 5; buf[n].idx = i; }
       else buf.push({ y: py, kind: 5, idx: i });
       n++;
@@ -2525,6 +2756,8 @@ export class Renderer {
     for (const p of state.projectiles) {
       // Draw faint lines for tower/HQ bolts only
       if (p.visual !== 'bolt') continue;
+      // Fog: skip if projectile is in unseen tile
+      if (state.fogOfWar && !this.isTileVisible(state, p.x, p.y)) continue;
       const target = state.units.find(u => u.id === p.targetId);
       if (!target) continue;
       const race = state.players[p.sourcePlayerId]?.race;
@@ -2772,20 +3005,44 @@ export class Renderer {
 
   private drawFloatingTexts(ctx: CanvasRenderingContext2D, state: GameState): void {
     for (const ft of state.floatingTexts) {
-      const alpha = 1 - ft.age / ft.maxAge;
-      const yOff = -(ft.age / ft.maxAge) * 20; // float upward
-      ctx.globalAlpha = alpha;
-      ctx.font = 'bold 10px monospace';
+      const t = ft.age / ft.maxAge; // 0→1 progress
+
+      // Eased alpha: hold full opacity longer, then quick fade out
+      const alpha = t < 0.6 ? 1 : 1 - ((t - 0.6) / 0.4) * ((t - 0.6) / 0.4);
+
+      // Vertical: fast initial rise that decelerates (easeOut)
+      const yOff = -(1 - (1 - t) * (1 - t)) * 24;
+
+      // Horizontal: random X offset from spawn
+      const xOff = ft.xOff * T;
+
+      // Pop-in scale for big/icon texts: start at 1.6x, settle to 1x in first 20%
+      let scale = 1;
+      if (ft.big) {
+        scale = t < 0.15 ? 1.6 - (t / 0.15) * 0.6 : 1;
+      }
+
+      const fontSize = ft.big ? 14 : 10;
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.font = `bold ${fontSize}px monospace`;
       ctx.textAlign = 'center';
-      const px = ft.x * T;
+      const px = ft.x * T + xOff;
       const py = ft.y * T + yOff;
+
+      ctx.save();
+      if (scale !== 1) {
+        ctx.translate(px, py);
+        ctx.scale(scale, scale);
+        ctx.translate(-px, -py);
+      }
+
       // Dark outline for readability
       ctx.strokeStyle = 'rgba(0,0,0,0.7)';
       ctx.lineWidth = 2.5;
       if (ft.icon) {
         // Draw text shifted left to make room for icon
         const textW = ctx.measureText(ft.text).width;
-        const iconSz = 10;
+        const iconSz = fontSize;
         const totalW = textW + iconSz + 1;
         const textX = px - totalW / 2 + textW / 2;
         ctx.strokeText(ft.text, textX, py);
@@ -2797,6 +3054,7 @@ export class Renderer {
         ctx.fillStyle = ft.color;
         ctx.fillText(ft.text, px, py);
       }
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = 'start';
@@ -3088,10 +3346,13 @@ export class Renderer {
     const localTeam = state.players[this.localPlayerId]?.team ?? Team.Bottom;
     const visibleChats = state.quickChats.filter(c => c.team === localTeam);
     if (visibleChats.length === 0) return;
-    const compact = this.canvas.clientWidth < 600;
-    const startX = 12;
-    const startY = compact ? 48 : 62;
+    const H = this.canvas.clientHeight;
     const lineH = 18;
+    const trayH = 68;
+    const safeBottom = getSafeBottom();
+    // Position above the bottom build tray, like a WoW chat channel
+    const bottomY = H - trayH - safeBottom - 8;
+    const startX = 12;
 
     for (let i = 0; i < visibleChats.length; i++) {
       const c = visibleChats[visibleChats.length - 1 - i];
@@ -3100,7 +3361,8 @@ export class Renderer {
       const text = `${style.icon} P${c.playerId + 1}: ${c.message}`;
       ctx.font = 'bold 12px monospace';
       const w = ctx.measureText(text).width + 12;
-      const y = startY + i * lineH;
+      // Stack upward from bottom (newest at bottom)
+      const y = bottomY - (visibleChats.length - 1 - i) * lineH;
       const rgb = hexToRgba(style.color);
       ctx.fillStyle = `${rgb}${0.18 * alpha})`;
       ctx.fillRect(startX, y - 12, w, 15);
@@ -3211,10 +3473,15 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Combat glow zones on minimap — pulse where fighting is happening
+    // Fog of war state for minimap filtering
+    const fog = state.fogOfWar;
+    const localTeam = state.players[this.localPlayerId]?.team ?? Team.Bottom;
+
+    // Combat glow zones on minimap — pulse where fighting is happening (fog-filtered)
     const combatClusters: { x: number; y: number; count: number }[] = [];
     for (const u of state.units) {
       if (u.targetId === null) continue;
+      if (fog && u.team !== localTeam && !this.isTileVisible(state, u.x, u.y)) continue;
       let added = false;
       for (const c of combatClusters) {
         if (Math.abs(c.x - u.x) < 8 && Math.abs(c.y - u.y) < 8) {
@@ -3238,14 +3505,31 @@ export class Renderer {
       ctx.fill();
     }
 
-    // Units as dots (player colored)
+    // Fog of war: draw fog overlay on minimap
+    if (fog) {
+      const vis = state.visibility[localTeam];
+      if (vis) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        // Draw fogged regions in coarse blocks for performance
+        const step = 4;
+        for (let ty = 0; ty < mH; ty += step) {
+          for (let tx = 0; tx < mW; tx += step) {
+            if (!vis[ty * mW + tx]) {
+              ctx.fillRect(mx + tx * scaleX, my + ty * scaleY, step * scaleX + 1, step * scaleY + 1);
+            }
+          }
+        }
+      }
+    }
+
+    // Units as dots (player colored) — fog-filtered
     for (const u of state.units) {
+      if (fog && u.team !== localTeam && !this.isTileVisible(state, u.x, u.y)) continue;
       ctx.fillStyle = PLAYER_COLORS[u.playerId] || '#888';
       ctx.fillRect(mx + u.x * scaleX - 1, my + u.y * scaleY - 1, 2, 2);
     }
 
     // Team-visible ping markers
-    const localTeam = state.players[this.localPlayerId]?.team ?? Team.Bottom;
     for (const p of state.pings) {
       if (p.team !== localTeam) continue;
       const pp = p.age / p.maxAge;
@@ -3259,17 +3543,19 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Harvesters as smaller dots
+    // Harvesters as smaller dots — fog-filtered
     for (const h of state.harvesters) {
       if (h.state === 'dead') continue;
+      if (fog && state.players[h.playerId]?.team !== localTeam && !this.isTileVisible(state, h.x, h.y)) continue;
       ctx.fillStyle = PLAYER_COLORS[h.playerId] || '#888';
       ctx.globalAlpha = 0.7;
       ctx.fillRect(mx + h.x * scaleX, my + h.y * scaleY, 1, 1);
       ctx.globalAlpha = 1;
     }
 
-    // Buildings as slightly larger dots
+    // Buildings as slightly larger dots — fog-filtered
     for (const b of state.buildings) {
+      if (fog && state.players[b.playerId]?.team !== localTeam && !this.isTileVisible(state, b.worldX, b.worldY)) continue;
       ctx.fillStyle = PLAYER_COLORS[b.playerId] || '#888';
       ctx.fillRect(mx + b.worldX * scaleX - 1, my + b.worldY * scaleY - 1, 3, 2);
     }
